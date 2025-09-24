@@ -10,6 +10,7 @@ import logger from './utils/logger.js';
 import { downloadExecutable, downloadToTempFile, checkForUpdatesAndUpdate } from './utils/yt-dlp.js';
 import { Youtube } from './utils/youtube.js';
 import { TwitchStream } from './@types/index.js';
+import https from 'https';
 
 // Download yt-dlp and check for updates
 (async () => {
@@ -139,7 +140,7 @@ streamer.client.on('messageCreate', async (message) => {
 			case 'play':
 				{
 					if (streamStatus.joined) {
-						sendError(message, 'Đã tham gia');
+						sendError(message, 'Bot hiện đang ở trong kênh thoại');
 						return;
 					}
 					// Get video name and find video file
@@ -185,7 +186,7 @@ streamer.client.on('messageCreate', async (message) => {
 			case 'playlink':
 				{
 					if (streamStatus.joined) {
-						sendError(message, 'Đã tham gia');
+						sendError(message, 'Bot hiện đang ở trong kênh thoại');
 						return;
 					}
 
@@ -196,6 +197,16 @@ streamer.client.on('messageCreate', async (message) => {
 						return;
 					}
 
+					const prepMessageContent = [
+						`-# 📥 Đang chuẩn bị video...`,
+						`> **${(new URL(link)).hostname}**`
+					].join("\n");
+
+					const prepMessage = await message.reply(prepMessageContent).catch(e => {
+						logger.warn("Gửi thông báo 'Đang tải...' thất bại:", e);
+						return null;
+					});
+
 					switch (true) {
 						case (link.includes('youtube.com/') || link.includes('youtu.be/')):
 							{
@@ -203,7 +214,7 @@ streamer.client.on('messageCreate', async (message) => {
 									const videoDetails = await youtube.getVideoInfo(link);
 
 									if (videoDetails && videoDetails.title) {
-										playVideo(message, link, videoDetails.title);
+										playVideo(message, link, videoDetails.title, prepMessage);
 									} else {
 										logger.error(`Không thể lấy thông tin video YouTube cho liên kết: ${link}.`);
 										await sendError(message, 'Xử lý liên kết YouTube thất bại.');
@@ -219,13 +230,13 @@ streamer.client.on('messageCreate', async (message) => {
 								const twitchId = link.split('/').pop() as string;
 								const twitchUrl = await getTwitchStreamUrl(link);
 								if (twitchUrl) {
-									playVideo(message, twitchUrl, `twitch.tv/${twitchId}`);
+									playVideo(message, twitchUrl, `twitch.tv/${twitchId}`, prepMessage);
 								}
 							}
 							break;
 						default:
 							{
-								playVideo(message, link, "URL");
+								playVideo(message, link, "URL", prepMessage);
 							}
 					}
 				}
@@ -281,7 +292,7 @@ streamer.client.on('messageCreate', async (message) => {
 			case 'stop':
 				{
 					if (!streamStatus.joined) {
-						sendError(message, '**Đã dừng rồi!**');
+						sendError(message, 'Đã dừng rồi!');
 						return;
 					}
 
@@ -296,6 +307,12 @@ streamer.client.on('messageCreate', async (message) => {
 						streamer.stopStream();
 						streamer.leaveVoice();
 						streamer.client.user?.setActivity(status_idle() as ActivityOptions);
+
+						const voiceChannel = streamer.client.channels.cache.get(streamStatus.channelInfo.channelId);
+						if (voiceChannel?.type === 'GUILD_VOICE' || voiceChannel?.type === 'GUILD_STAGE_VOICE') {
+							//voiceChannel.status = "";
+							await updateVoiceStatus(streamStatus.channelInfo.channelId, "");
+						}
 
 						streamStatus.joined = false;
 						streamStatus.joinsucc = false;
@@ -424,7 +441,7 @@ streamer.client.on('messageCreate', async (message) => {
 });
 
 // Function to play video
-async function playVideo(message: Message, videoSource: string, title?: string) {
+async function playVideo(message: Message, videoSource: string, title?: string, initialMessage?: Message) {
 	const [guildId, channelId, cmdChannelId] = [config.guildId, config.videoChannelId, config.cmdChannelId!];
 
 	streamStatus.manualStop = false;
@@ -453,14 +470,22 @@ async function playVideo(message: Message, videoSource: string, title?: string) 
 				}
 			} else {
 				const downloadingMessage = [
-					`-# 📥 Đang chuẩn bị...`,
-					`> ${title || videoSource}`
+					`-# 📥 Đang tải về...`,
+					`> **${title || videoSource}**`
 				].join("\n");
 
-				downloadInProgressMessage = await message.reply(downloadingMessage).catch(e => {
-					logger.warn("Gửi thông báo 'Đang tải...' thất bại:", e);
-					return null;
-				});
+				if (!initialMessage) {
+					downloadInProgressMessage = await message.reply(downloadingMessage).catch(e => {
+						logger.warn("Gửi thông báo 'Đang tải...' thất bại:", e);
+						return null;
+					});
+				} else {
+					await initialMessage.edit(downloadingMessage).catch(e => {
+						logger.warn("Gửi thông báo 'Đang tải...' thất bại:", e);
+						return null;
+					});
+				}
+				
 				logger.info(`Đang tải xuống ${title || videoSource}...`);
 
 				const ytDlpDownloadOptions: Parameters<typeof downloadToTempFile>[1] = {
@@ -499,7 +524,7 @@ async function playVideo(message: Message, videoSource: string, title?: string) 
 
 			if (voiceChannel?.type === 'GUILD_VOICE' || voiceChannel?.type === 'GUILD_STAGE_VOICE') {
 				//voiceChannel.status = `📽 ${title}`;
-				await updateVoiceStatus(channelId, `📽 ${title}`);
+				await updateVoiceStatus(channelId, `📽  ${title}`);
 			}
 		}
 
@@ -652,7 +677,6 @@ async function updateVoiceStatus(channelId: string, status: string) {
 		const payload = JSON.stringify({ status });
 
 		await new Promise<void>((resolve) => {
-			const https = require('https');
 			const opts = {
 				method: 'PUT',
 				headers: {
@@ -692,7 +716,7 @@ async function updateVoiceStatus(channelId: string, status: string) {
 async function sendPlaying(message: Message, title: string) {
 	const content = [
 		`-# 📽 Đang phát`,
-		`> ${title}`
+		`> **${title}**`
 	].join("\n");
 	await Promise.all([
 		message.react('▶️'),
@@ -706,7 +730,7 @@ async function sendFinishMessage() {
 	if (channel) {
 		const content = [
 			`-# ⏹️ Ngắt kết nối`,
-			`> Không còn video nào để phát tiếp.`
+			`> **Video đã kết thúc.**`
 		].join("\n");
 		channel.send(content);
 	}
@@ -739,7 +763,7 @@ async function sendList(message: Message, items: string[], type?: string) {
 // Function to send info message
 async function sendInfo(message: Message, title: string, description: string) {
 	await message.react('ℹ️');
-	await message.channel.send(`> ℹ️ ${title}\n${description}`);
+	await message.channel.send(`> ℹ️ ${title}\n> **${description}**`);
 }
 
 
@@ -748,7 +772,7 @@ async function sendSuccess(message: Message, description: string) {
 	await message.react('✅');
 	const content = [
 		`-# ✅ Thành công`,
-		`> ${description}`
+		`> **${description}**`
 	].join("\n");
 	await message.channel.send(content);
 }
@@ -758,7 +782,7 @@ async function sendError(message: Message, error: string) {
 	await message.react('❌');
 	const content = [
 		`-# ❌ Lỗi`,
-		`> ${error}`
+		`> **${error}**`
 	].join("\n");
 	await message.reply(content);
 }
