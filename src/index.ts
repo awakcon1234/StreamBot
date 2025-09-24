@@ -17,7 +17,7 @@ import { TwitchStream } from './@types/index.js';
 		await downloadExecutable();
 		await checkForUpdatesAndUpdate();
 	} catch (error) {
-		logger.error("Error during initial yt-dlp setup/update:", error);
+		logger.error("Lỗi khi thiết lập/cập nhật yt-dlp ban đầu:", error);
 	}
 })();
 
@@ -68,12 +68,12 @@ let videos = videoFiles.map(file => {
 });
 
 // print out all videos
-logger.info(`Available videos:\n${videos.map(m => m.name).join('\n')}`);
+logger.info(`Các video có sẵn:\n${videos.map(m => m.name).join('\n')}`);
 
 // Ready event
 streamer.client.on("ready", async () => {
 	if (streamer.client.user) {
-		logger.info(`${streamer.client.user.tag} is ready`);
+		logger.info(`${streamer.client.user.tag} đã sẵn sàng`);
 		streamer.client.user?.setActivity(status_idle() as ActivityOptions);
 	}
 });
@@ -139,7 +139,7 @@ streamer.client.on('messageCreate', async (message) => {
 			case 'play':
 				{
 					if (streamStatus.joined) {
-						sendError(message, 'Already joined');
+						sendError(message, 'Đã tham gia');
 						return;
 					}
 					// Get video name and find video file
@@ -147,7 +147,7 @@ streamer.client.on('messageCreate', async (message) => {
 					const video = videos.find(m => m.name == videoname);
 
 					if (!video) {
-						await sendError(message, 'Video not found');
+						await sendError(message, 'Không tìm thấy video');
 						return;
 					}
 
@@ -171,12 +171,12 @@ streamer.client.on('messageCreate', async (message) => {
 							}
 
 						} catch (error) {
-							logger.error('Unable to determine resolution, using static resolution....', error);
+							logger.error('Không thể xác định độ phân giải, sử dụng độ phân giải tĩnh....', error);
 						}
 					}
 
 					// Log playing video
-					logger.info(`Playing local video: ${video.path}`);
+					logger.info(`Phát video cục bộ: ${video.path}`);
 
 					// Play video
 					playVideo(message, video.path, videoname);
@@ -185,14 +185,14 @@ streamer.client.on('messageCreate', async (message) => {
 			case 'playlink':
 				{
 					if (streamStatus.joined) {
-						sendError(message, 'Already joined');
+						sendError(message, 'Đã tham gia');
 						return;
 					}
 
 					const link = args.shift() || '';
 
 					if (!link) {
-						await sendError(message, 'Please provide a link.');
+						await sendError(message, 'Vui lòng cung cấp liên kết.');
 						return;
 					}
 
@@ -205,12 +205,12 @@ streamer.client.on('messageCreate', async (message) => {
 									if (videoDetails && videoDetails.title) {
 										playVideo(message, link, videoDetails.title);
 									} else {
-										logger.error(`Failed to get YouTube video info for link: ${link}.`);
-										await sendError(message, 'Failed to process YouTube link.');
+										logger.error(`Không thể lấy thông tin video YouTube cho liên kết: ${link}.`);
+										await sendError(message, 'Xử lý liên kết YouTube thất bại.');
 									}
 								} catch (error) {
-									logger.error(`Error processing YouTube link: ${link}`, error);
-									await sendError(message, 'Error processing YouTube link.');
+									logger.error(`Lỗi khi xử lý liên kết YouTube: ${link}`, error);
+									await sendError(message, 'Xử lý liên kết YouTube thất bại.');
 								}
 							}
 							break;
@@ -235,7 +235,7 @@ streamer.client.on('messageCreate', async (message) => {
 					const title = args.length > 1 ? args.slice(1).join(' ') : args[1] || args.shift() || '';
 
 					if (!title) {
-						await sendError(message, 'Please provide a video title.');
+						await sendError(message, 'Vui lòng cung cấp tiêu đề video.');
 						return;
 					}
 
@@ -248,13 +248,13 @@ streamer.client.on('messageCreate', async (message) => {
 						if (searchResult.pageUrl && searchResult.title) {
 							playVideo(message, searchResult.pageUrl, searchResult.title);
 						} else {
-							logger.warn(`No video found or title missing for search: "${title}" using youtube.searchAndGetPageUrl.`);
+							logger.warn(`Không tìm thấy video hoặc tiêu đề bị thiếu cho tìm kiếm: "${title}" sử dụng youtube.searchAndGetPageUrl.`);
 							throw new Error('Could not find video');
 						}
 					} catch (error) {
-						logger.error('Failed to play YouTube video:', error);
+						logger.error('Không thể phát video YouTube:', error);
 						await cleanupStreamStatus();
-						await sendError(message, 'Failed to play video. Please try again.');
+						await sendError(message, 'Không thể phát video. Vui lòng thử lại.');
 					}
 				}
 				break;
@@ -263,7 +263,7 @@ streamer.client.on('messageCreate', async (message) => {
 					const query = args.length > 1 ? args.slice(1).join(' ') : args[1] || args.shift() || '';
 
 					if (!query) {
-						await sendError(message, 'Please provide a search query.');
+						await sendError(message, 'Vui lòng cung cấp truy vấn tìm kiếm.');
 						return;
 					}
 
@@ -274,14 +274,14 @@ streamer.client.on('messageCreate', async (message) => {
 						}
 
 					} catch (error) {
-						await sendError(message, 'Failed to search for videos.');
+						await sendError(message, 'Không thể tìm kiếm video.');
 					}
 				}
 				break;
 			case 'stop':
 				{
 					if (!streamStatus.joined) {
-						sendError(message, '**Already Stopped!**');
+						sendError(message, '**Đã dừng rồi!**');
 						return;
 					}
 
@@ -291,7 +291,7 @@ streamer.client.on('messageCreate', async (message) => {
 						controller?.abort();
 
 						await sendSuccess(message, 'Đã dừng phát video.');
-						logger.info("Stopped playing video.");
+						logger.info('Đã dừng phát video.');
 
 						streamer.stopStream();
 						streamer.leaveVoice();
@@ -307,7 +307,7 @@ streamer.client.on('messageCreate', async (message) => {
 						};
 
 					} catch (error) {
-						logger.error("Error during force termination:", error);
+						logger.error('Lỗi khi dừng cưỡng bức:', error);
 					}
 				}
 				break;
@@ -317,14 +317,14 @@ streamer.client.on('messageCreate', async (message) => {
 					if (videoList.length > 0) {
 						await sendList(message, videoList);
 					} else {
-						await sendError(message, 'No videos found');
+						await sendError(message, 'Không tìm thấy video nào');
 					}
 				}
 				break;
 			case 'status':
 				{
-					await sendInfo(message, 'Status',
-						`Joined: ${streamStatus.joined}\nPlaying: ${streamStatus.playing}`);
+					await sendInfo(message, 'Trạng thái',
+						`Đã tham gia: ${streamStatus.joined}\nĐang phát: ${streamStatus.playing}`);
 				}
 				break;
 			case 'refresh':
@@ -347,7 +347,7 @@ streamer.client.on('messageCreate', async (message) => {
 					const vid_name = videos.find(m => m.name === vid);
 
 					if (!vid_name) {
-						await sendError(message, 'Video not found');
+						await sendError(message, 'Không tìm thấy video');
 						return;
 					}
 
@@ -355,7 +355,7 @@ streamer.client.on('messageCreate', async (message) => {
 					message.react('📸');
 
 					// Reply with message to indicate that the preview is being generated
-					message.reply('📸 **Generating preview thumbnails...**');
+					message.reply('📸 **Đang tạo ảnh xem trước...**');
 
 					try {
 
@@ -378,10 +378,10 @@ streamer.client.on('messageCreate', async (message) => {
 							});
 
 						} else {
-							await sendError(message, 'Failed to generate preview thumbnails.');
+							await sendError(message, 'Tạo ảnh xem trước thất bại.');
 						}
 					} catch (error) {
-						logger.error('Error generating preview thumbnails:', error);
+						logger.error('Lỗi khi tạo ảnh xem trước:', error);
 					}
 				}
 				break;
@@ -417,7 +417,7 @@ streamer.client.on('messageCreate', async (message) => {
 				break;
 			default:
 				{
-					await sendError(message, 'Invalid command');
+					await sendError(message, 'Lệnh không hợp lệ');
 				}
 		}
 	}
@@ -444,10 +444,10 @@ async function playVideo(message: Message, videoSource: string, title?: string) 
 				const liveStreamUrl = await youtube.getLiveStreamUrl(videoSource);
 				if (liveStreamUrl) {
 					inputForFfmpeg = liveStreamUrl;
-					logger.info(`Using direct live stream URL for ffmpeg: ${liveStreamUrl}`);
+					logger.info(`Sử dụng URL luồng trực tiếp cho ffmpeg: ${liveStreamUrl}`);
 				} else {
-					logger.error(`Failed to get live stream URL for ${title || videoSource}. Falling back to download attempt or error.`);
-					await sendError(message, `Failed to get live stream URL for \`${title || 'YouTube live video'}\`.`);
+					logger.error(`Không thể lấy URL luồng trực tiếp cho ${title || videoSource}.`);
+					await sendError(message, `Không thể lấy URL luồng trực tiếp cho \`${title || 'YouTube live video'}\`.`);
 					await cleanupStreamStatus();
 					return;
 				}
@@ -458,10 +458,10 @@ async function playVideo(message: Message, videoSource: string, title?: string) 
 				].join("\n");
 
 				downloadInProgressMessage = await message.reply(downloadingMessage).catch(e => {
-					logger.warn("Failed to send 'Downloading...' message:", e);
+					logger.warn("Gửi thông báo 'Đang tải...' thất bại:", e);
 					return null;
 				});
-				logger.info(`Downloading ${title || videoSource}...`);
+				logger.info(`Đang tải xuống ${title || videoSource}...`);
 
 				const ytDlpDownloadOptions: Parameters<typeof downloadToTempFile>[1] = {
 					format: `bestvideo[height<=${streamOpts.height || 720}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=${streamOpts.height || 720}]+bestaudio/best[height<=${streamOpts.height || 720}]/best`,
@@ -471,16 +471,16 @@ async function playVideo(message: Message, videoSource: string, title?: string) 
 				try {
 					tempFilePath = await downloadToTempFile(videoSource, ytDlpDownloadOptions);
 					inputForFfmpeg = tempFilePath;
-					logger.info(`Playing ${title || videoSource}...`);
+					logger.info(`Đang phát ${title || videoSource}...`);
 					if (downloadInProgressMessage) {
-						await downloadInProgressMessage.delete().catch(e => logger.warn("Failed to delete 'Downloading...' message:", e));
+						await downloadInProgressMessage.delete().catch(e => logger.warn("Xóa thông báo 'Đang tải...' thất bại:", e));
 					}
 				} catch (downloadError) {
-					logger.error("Failed to download YouTube video:", downloadError);
+					logger.error('Tải xuống video YouTube thất bại:', downloadError);
 					if (downloadInProgressMessage) {
-						await downloadInProgressMessage.edit(`❌ Failed to download \`${title || 'YouTube video'}\`.`).catch(e => logger.warn("Failed to edit 'Downloading...' message:", e));
+						await downloadInProgressMessage.edit(`❌ Tải xuống thất bại \`${title || 'Video YouTube'}\`.`).catch(e => logger.warn("Sửa thông báo 'Đang tải...' thất bại:", e));
 					} else {
-						await sendError(message, `Failed to download video: ${downloadError instanceof Error ? downloadError.message : String(downloadError)}`);
+						await sendError(message, `Tải xuống video thất bại: ${downloadError instanceof Error ? downloadError.message : String(downloadError)}`);
 					}
 					await cleanupStreamStatus();
 					return;
@@ -509,19 +509,19 @@ async function playVideo(message: Message, videoSource: string, title?: string) 
 		controller = new AbortController();
 
 		if (!controller) {
-			throw new Error('Controller is not initialized');
+			throw new Error('Bộ điều khiển chưa được khởi tạo');
 		}
 		const { command, output: ffmpegOutput } = prepareStream(inputForFfmpeg, streamOpts, controller.signal);
 
 		command.on("error", (err, stdout, stderr) => {
 			// Don't log error if it's due to manual stop
 			if (!streamStatus.manualStop && controller && !controller.signal.aborted) {
-				logger.error("An error happened with ffmpeg:", err.message);
+				logger.error('Lỗi xảy ra với ffmpeg:', err.message);
 				if (stdout) {
-					logger.error("ffmpeg stdout:", stdout);
+					logger.error('ffmpeg stdout:', stdout);
 				}
 				if (stderr) {
-					logger.error("ffmpeg stderr:", stderr);
+					logger.error('ffmpeg stderr:', stderr);
 				}
 				controller.abort();
 			}
@@ -530,17 +530,17 @@ async function playVideo(message: Message, videoSource: string, title?: string) 
 		await playStream(ffmpegOutput, streamer, undefined, controller.signal)
 			.catch((err) => {
 				if (controller && !controller.signal.aborted) {
-					logger.error('playStream error:', err);
+					logger.error('Lỗi playStream:', err);
 				}
 				if (controller && !controller.signal.aborted) controller.abort();
 			});
 
 		if (controller && !controller.signal.aborted) {
-			logger.info(`Finished playing: ${title || videoSource}`);
+			logger.info(`Đã phát xong: ${title || videoSource}`);
 		}
 
 	} catch (error) {
-		logger.error(`Error in playVideo for ${title || videoSource}:`, error);
+		logger.error(`Lỗi trong playVideo cho ${title || videoSource}:`, error);
 		if (controller && !controller.signal.aborted) controller.abort();
 	} finally {
 		if (!streamStatus.manualStop && controller && !controller.signal.aborted) {
@@ -553,7 +553,7 @@ async function playVideo(message: Message, videoSource: string, title?: string) 
 			try {
 				fs.unlinkSync(tempFilePath);
 			} catch (cleanupError) {
-				logger.error(`Failed to delete temp file ${tempFilePath}:`, cleanupError);
+				logger.error(`Xóa tệp tạm ${tempFilePath} thất bại:`, cleanupError);
 			}
 		}
 	}
@@ -590,7 +590,7 @@ async function cleanupStreamStatus() {
 			cmdChannelId: "",
 		};
 	} catch (error) {
-		logger.error("Error during cleanup:", error);
+		logger.error('Lỗi khi dọn dẹp:', error);
 	}
 }
 
@@ -605,7 +605,7 @@ async function getTwitchStreamUrl(url: string): Promise<string | null> {
 			if (vod?.url) {
 				return vod.url;
 			}
-			logger.error("No VOD URL found");
+			logger.error('Không tìm thấy URL VOD');
 			return null;
 		} else {
 			const twitchId = url.split('/').pop() as string;
@@ -614,11 +614,11 @@ async function getTwitchStreamUrl(url: string): Promise<string | null> {
 			if (stream?.url) {
 				return stream.url;
 			}
-			logger.error("No Stream URL found");
+			logger.error('Không tìm thấy URL luồng');
 			return null;
 		}
 	} catch (error) {
-		logger.error("Failed to get Twitch stream URL:", error);
+		logger.error('Lấy URL Twitch thất bại:', error);
 		return null;
 	}
 }
@@ -631,7 +631,7 @@ async function ytSearch(title: string): Promise<string[]> {
 const status_idle = () => {
 	return new CustomStatus(new Client())
 		.setEmoji('📽')
-		.setState('Watching something!')
+		.setState('Đang xem gì đó!')
 }
 
 const status_watch = (name: string) => {
@@ -645,7 +645,7 @@ async function updateVoiceStatus(channelId: string, status: string) {
 		if (!channelId) return;
 		const token = config.token;
 		if (!token) {
-			logger.warn('Discord token not configured, cannot update voice status');
+			logger.warn('Token Discord chưa được cấu hình, không thể cập nhật trạng thái kênh thoại');
 			return;
 		}
 
@@ -667,16 +667,16 @@ async function updateVoiceStatus(channelId: string, status: string) {
 				res.on('data', (chunk: any) => body += chunk);
 				res.on('end', () => {
 					if (res.statusCode >= 200 && res.statusCode < 300) {
-						logger.info(`Updated voice status for channel ${channelId} -> ${status}`);
+						logger.info(`Đã cập nhật trạng thái kênh thoại ${channelId} -> ${status}`);
 					} else {
-						logger.warn(`Failed to update voice status for channel ${channelId}: ${res.statusCode} ${res.statusMessage} - ${body}`);
+						logger.warn(`Không thể cập nhật trạng thái kênh thoại ${channelId}: ${res.statusCode} ${res.statusMessage} - ${body}`);
 					}
 					resolve();
 				});
 			});
 
 			req.on('error', (err: any) => {
-				logger.error('Error updating voice status:', err);
+				logger.error('Lỗi khi cập nhật trạng thái kênh thoại:', err);
 				resolve();
 			});
 
@@ -684,7 +684,7 @@ async function updateVoiceStatus(channelId: string, status: string) {
 			req.end();
 		});
 	} catch (err) {
-		logger.error('updateVoiceStatus error:', err);
+		logger.error('Lỗi updateVoiceStatus:', err);
 	}
 }
 
@@ -766,7 +766,7 @@ async function sendError(message: Message, error: string) {
 // Handle uncaught exceptions
 process.on('uncaughtException', (error) => {
 	if (!(error instanceof Error && error.message.includes('SIGTERM'))) {
-		logger.error('Uncaught Exception:', error);
+		logger.error('Ngoại lệ không được xử lý:', error);
 		return
 	}
 });
