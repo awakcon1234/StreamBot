@@ -480,7 +480,7 @@ async function playVideo(message: Message, videoSource: string, title?: string, 
 						return null;
 					});
 				} else {
-					await initialMessage.edit(downloadingMessage).catch(e => {
+					downloadInProgressMessage = await initialMessage.edit(downloadingMessage).catch(e => {
 						logger.warn("Gửi thông báo 'Đang tải...' thất bại:", e);
 						return null;
 					});
