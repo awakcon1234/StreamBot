@@ -454,7 +454,7 @@ async function playVideo(message: Message, videoSource: string, title?: string) 
 			} else {
 				const downloadingMessage = [
 					`-# 📥 Đang chuẩn bị...`,
-					`## ${title || videoSource}`
+					`> ${title || videoSource}`
 				].join("\n");
 
 				downloadInProgressMessage = await message.reply(downloadingMessage).catch(e => {
@@ -498,7 +498,8 @@ async function playVideo(message: Message, videoSource: string, title?: string) 
 			const voiceChannel = streamer.client.channels.cache.get(channelId);
 
 			if (voiceChannel?.type === 'GUILD_VOICE' || voiceChannel?.type === 'GUILD_STAGE_VOICE') {
-				voiceChannel.status = `📽 ${title}`;
+				//voiceChannel.status = `📽 ${title}`;
+				await updateVoiceStatus(channelId, `📽 ${title}`);
 			}
 		}
 
@@ -574,7 +575,8 @@ async function cleanupStreamStatus() {
 		const voiceChannel = streamer.client.channels.cache.get(streamStatus.channelInfo.channelId);
 
 		if (voiceChannel?.type === 'GUILD_VOICE' || voiceChannel?.type === 'GUILD_STAGE_VOICE') {
-			voiceChannel.status = "";
+			//voiceChannel.status = "";
+			await updateVoiceStatus(streamStatus.channelInfo.channelId, "");
 		}
 
 		// Reset all status flags
@@ -638,11 +640,59 @@ const status_watch = (name: string) => {
 		.setState(`Đang phát ${name}...`)
 }
 
+async function updateVoiceStatus(channelId: string, status: string) {
+	try {
+		if (!channelId) return;
+		const token = config.token;
+		if (!token) {
+			logger.warn('Discord token not configured, cannot update voice status');
+			return;
+		}
+
+		const payload = JSON.stringify({ status });
+
+		await new Promise<void>((resolve) => {
+			const https = require('https');
+			const opts = {
+				method: 'PUT',
+				headers: {
+					'Authorization': token,
+					'Content-Type': 'application/json',
+					'Content-Length': Buffer.byteLength(payload)
+				}
+			};
+
+			const req = https.request(`https://discord.com/api/v10/channels/${channelId}/voice-status`, opts as any, (res: any) => {
+				let body = '';
+				res.on('data', (chunk: any) => body += chunk);
+				res.on('end', () => {
+					if (res.statusCode >= 200 && res.statusCode < 300) {
+						logger.info(`Updated voice status for channel ${channelId} -> ${status}`);
+					} else {
+						logger.warn(`Failed to update voice status for channel ${channelId}: ${res.statusCode} ${res.statusMessage} - ${body}`);
+					}
+					resolve();
+				});
+			});
+
+			req.on('error', (err: any) => {
+				logger.error('Error updating voice status:', err);
+				resolve();
+			});
+
+			req.write(payload);
+			req.end();
+		});
+	} catch (err) {
+		logger.error('updateVoiceStatus error:', err);
+	}
+}
+
 // Funtction to send playing message
 async function sendPlaying(message: Message, title: string) {
 	const content = [
 		`-# 📽 Đang phát`,
-		`## ${title}`
+		`> ${title}`
 	].join("\n");
 	await Promise.all([
 		message.react('▶️'),
@@ -656,7 +706,7 @@ async function sendFinishMessage() {
 	if (channel) {
 		const content = [
 			`-# ⏹️ Đã kết thúc`,
-			`## Video vừa phát đã hết.`
+			`> Video vừa phát đã hết.`
 		].join("\n");
 		channel.send(content);
 	}
@@ -689,7 +739,7 @@ async function sendList(message: Message, items: string[], type?: string) {
 // Function to send info message
 async function sendInfo(message: Message, title: string, description: string) {
 	await message.react('ℹ️');
-	await message.channel.send(`## ℹ️ ${title}\n${description}`);
+	await message.channel.send(`> ℹ️ ${title}\n${description}`);
 }
 
 
@@ -698,7 +748,7 @@ async function sendSuccess(message: Message, description: string) {
 	await message.react('✅');
 	const content = [
 		`-# ✅ Thành công`,
-		`## ${description}`
+		`> ${description}`
 	].join("\n");
 	await message.channel.send(content);
 }
@@ -708,7 +758,7 @@ async function sendError(message: Message, error: string) {
 	await message.react('❌');
 	const content = [
 		`-# ❌ Lỗi`,
-		`## ${error}`
+		`> ${error}`
 	].join("\n");
 	await message.reply(content);
 }
