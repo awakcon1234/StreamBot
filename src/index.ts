@@ -705,8 +705,8 @@ async function sendFinishMessage() {
 	const channel = streamer.client.channels.cache.get(config.cmdChannelId.toString()) as TextChannel;
 	if (channel) {
 		const content = [
-			`-# ⏹️ Đã kết thúc`,
-			`> Video vừa phát đã hết.`
+			`-# ⏹️ Ngắt kết nối`,
+			`> Không còn video nào để phát tiếp.`
 		].join("\n");
 		channel.send(content);
 	}
