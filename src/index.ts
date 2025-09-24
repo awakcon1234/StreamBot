@@ -290,7 +290,7 @@ streamer.client.on('messageCreate', async (message) => {
 
 						controller?.abort();
 
-						await sendSuccess(message, 'Stopped playing video.');
+						await sendSuccess(message, 'Đã dừng phát video.');
 						logger.info("Stopped playing video.");
 
 						streamer.stopStream();
@@ -389,23 +389,23 @@ streamer.client.on('messageCreate', async (message) => {
 				{
 					// Help text
 					const helpText = [
-						'📽 **Available Commands**',
+						'📽 **Các câu lệnh có sẵn**',
 						'',
-						'🎬 **Media**',
-						`\`${config.prefix}play\` - Play local video`,
-						`\`${config.prefix}playlink\` - Play video from URL/YouTube/Twitch`,
-						`\`${config.prefix}ytplay\` - Play video from YouTube`,
-						`\`${config.prefix}stop\` - Stop playback`,
+						'🎬 **Phát lại**',
+						`\`${config.prefix}play\` - Phát video offline`,
+						`\`${config.prefix}playlink\` - Phát video từ URL/YouTube/Twitch`,
+						`\`${config.prefix}ytplay\` - Phát video từ YouTube`,
+						`\`${config.prefix}stop\` - Dừng phát`,
 						'',
-						'🛠️ **Utils**',
-						`\`${config.prefix}list\` - Show local videos`,
-						`\`${config.prefix}refresh\` - Update list`,
-						`\`${config.prefix}status\` - Show status`,
-						`\`${config.prefix}preview\` - Video preview`,
+						'🛠️ **Công cụ**',
+						`\`${config.prefix}list\` - Hiện danh sách video offline`,
+						`\`${config.prefix}refresh\` - Cập nhật danh sách video`,
+						`\`${config.prefix}status\` - Hiện trạng thái phát`,
+						`\`${config.prefix}preview\` - Xem trước video`,
 						'',
-						'🔍 **Search**',
-						`\`${config.prefix}ytsearch\` - YouTube search`,
-						`\`${config.prefix}help\` - Show this help`
+						'🔍 **Tìm kiếm**',
+						`\`${config.prefix}ytsearch\` - Tìm kiếm trên YouTube`,
+						`\`${config.prefix}help\` - Hiện trợ giúp này`
 					].join('\n');
 
 					// React with clipboard emoji
@@ -452,7 +452,12 @@ async function playVideo(message: Message, videoSource: string, title?: string) 
 					return;
 				}
 			} else {
-				downloadInProgressMessage = await message.reply(`📥 Downloading \`${title || 'YouTube video'}\`...`).catch(e => {
+				const downloadingMessage = [
+					`-# 📥 Đang chuẩn bị...`,
+					`### ${title || videoSource}`
+				].join("\n");
+
+				downloadInProgressMessage = await message.reply(downloadingMessage).catch(e => {
 					logger.warn("Failed to send 'Downloading...' message:", e);
 					return null;
 				});
@@ -612,18 +617,21 @@ async function ytSearch(title: string): Promise<string[]> {
 const status_idle = () => {
 	return new CustomStatus(new Client())
 		.setEmoji('📽')
-		.setState('Watching Something!')
+		.setState('Watching something!')
 }
 
 const status_watch = (name: string) => {
 	return new CustomStatus(new Client())
 		.setEmoji('📽')
-		.setState(`Playing ${name}...`)
+		.setState(`Đang phát ${name}...`)
 }
 
 // Funtction to send playing message
 async function sendPlaying(message: Message, title: string) {
-	const content = `📽 **Now Playing**: \`${title}\``;
+	const content = [
+		`-# 📽 Đang phát`,
+		`### ${title}`
+	].join("\n");
 	await Promise.all([
 		message.react('▶️'),
 		message.reply(content)
@@ -634,7 +642,11 @@ async function sendPlaying(message: Message, title: string) {
 async function sendFinishMessage() {
 	const channel = streamer.client.channels.cache.get(config.cmdChannelId.toString()) as TextChannel;
 	if (channel) {
-		channel.send('⏹️ **Finished**: Finished playing video.');
+		const content = [
+			`-# ⏹️ Đã kết thúc`,
+			`### Video vừa phát đã hết.`
+		].join("\n");
+		channel.send(content);
 	}
 }
 
@@ -642,31 +654,51 @@ async function sendFinishMessage() {
 async function sendList(message: Message, items: string[], type?: string) {
 	await message.react('📋');
 	if (type == "ytsearch") {
-		await message.reply(`📋 **Search Results**:\n${items.join('\n')}`);
+		const content = [
+			`-# 📋 Kết quả tìm kiếm`,
+			items.map(i => `- ${i}`).join('\n')
+		].join("\n");
+		await message.reply(content);
 	} else if (type == "refresh") {
-		await message.reply(`📋 **Video list refreshed**:\n${items.join('\n')}`);
+		const content = [
+			`-# 📋 Đã làm mới danh sách video`,
+			items.map(i => `- ${i}`).join('\n')
+		].join("\n");
+		await message.reply(content);
 	} else {
-		await message.channel.send(`📋 **Local Videos List**:\n${items.join('\n')}`);
+		const content = [
+			`-# 📋 Danh sách video`,
+			items.map(i => `- ${i}`).join('\n')
+		].join("\n");
+		await message.channel.send(content);
 	}
 }
 
 // Function to send info message
 async function sendInfo(message: Message, title: string, description: string) {
 	await message.react('ℹ️');
-	await message.channel.send(`ℹ️ **${title}**: ${description}`);
+	await message.channel.send(`## ℹ️ ${title}\n${description}`);
 }
 
 
 // Function to send success message
 async function sendSuccess(message: Message, description: string) {
 	await message.react('✅');
-	await message.channel.send(`✅ **Success**: ${description}`);
+	const content = [
+		`-# ✅ Thành công`,
+		`### ${description}`
+	].join("\n");
+	await message.channel.send(content);
 }
 
 // Function to send error message
 async function sendError(message: Message, error: string) {
 	await message.react('❌');
-	await message.reply(`❌ **Error**: ${error}`);
+	const content = [
+		`-# ❌ Lỗi`,
+		`### ${error}`
+	].join("\n");
+	await message.reply(content);
 }
 
 // Handle uncaught exceptions
