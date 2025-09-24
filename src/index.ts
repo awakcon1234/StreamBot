@@ -1,4 +1,4 @@
-import { Client, TextChannel, CustomStatus, Message, MessageAttachment, ActivityOptions } from "discord.js-selfbot-v13";
+import { Client, TextChannel, CustomStatus, Message, MessageAttachment, ActivityOptions, BaseGuildVoiceChannel } from "discord.js-selfbot-v13";
 import { Streamer, Utils, prepareStream, playStream } from "@dank074/discord-video-stream";
 import config from "./config.js";
 import fs from 'fs';
@@ -495,7 +495,13 @@ async function playVideo(message: Message, videoSource: string, title?: string) 
 
 		if (title) {
 			streamer.client.user?.setActivity(status_watch(title) as ActivityOptions);
+			const voiceChannel = streamer.client.channels.cache.get(channelId);
+
+			if (voiceChannel instanceof BaseGuildVoiceChannel) {
+				voiceChannel.status = `📽 ${title}`;
+			}
 		}
+
 		await sendPlaying(message, title || videoSource);
 
 		controller?.abort();
@@ -564,6 +570,10 @@ async function cleanupStreamStatus() {
 		streamer.leaveVoice();
 
 		streamer.client.user?.setActivity(status_idle() as ActivityOptions);
+
+		const voiceChannel = streamer.client.channels.cache.get(streamStatus.channelInfo.channelId);
+		if (voiceChannel instanceof BaseGuildVoiceChannel)
+			voiceChannel.status = null;
 
 		// Reset all status flags
 		streamStatus.joined = false;
