@@ -454,7 +454,7 @@ async function playVideo(message: Message, videoSource: string, title?: string) 
 			} else {
 				const downloadingMessage = [
 					`-# 📥 Đang chuẩn bị...`,
-					`### ${title || videoSource}`
+					`## ${title || videoSource}`
 				].join("\n");
 
 				downloadInProgressMessage = await message.reply(downloadingMessage).catch(e => {
@@ -497,7 +497,7 @@ async function playVideo(message: Message, videoSource: string, title?: string) 
 			streamer.client.user?.setActivity(status_watch(title) as ActivityOptions);
 			const voiceChannel = streamer.client.channels.cache.get(channelId);
 
-			if (voiceChannel instanceof BaseGuildVoiceChannel) {
+			if (voiceChannel?.type === 'GUILD_VOICE' || voiceChannel?.type === 'GUILD_STAGE_VOICE') {
 				voiceChannel.status = `📽 ${title}`;
 			}
 		}
@@ -572,8 +572,10 @@ async function cleanupStreamStatus() {
 		streamer.client.user?.setActivity(status_idle() as ActivityOptions);
 
 		const voiceChannel = streamer.client.channels.cache.get(streamStatus.channelInfo.channelId);
-		if (voiceChannel instanceof BaseGuildVoiceChannel)
-			voiceChannel.status = null;
+
+		if (voiceChannel?.type === 'GUILD_VOICE' || voiceChannel?.type === 'GUILD_STAGE_VOICE') {
+			voiceChannel.status = "";
+		}
 
 		// Reset all status flags
 		streamStatus.joined = false;
@@ -640,7 +642,7 @@ const status_watch = (name: string) => {
 async function sendPlaying(message: Message, title: string) {
 	const content = [
 		`-# 📽 Đang phát`,
-		`### ${title}`
+		`## ${title}`
 	].join("\n");
 	await Promise.all([
 		message.react('▶️'),
@@ -654,7 +656,7 @@ async function sendFinishMessage() {
 	if (channel) {
 		const content = [
 			`-# ⏹️ Đã kết thúc`,
-			`### Video vừa phát đã hết.`
+			`## Video vừa phát đã hết.`
 		].join("\n");
 		channel.send(content);
 	}
@@ -696,7 +698,7 @@ async function sendSuccess(message: Message, description: string) {
 	await message.react('✅');
 	const content = [
 		`-# ✅ Thành công`,
-		`### ${description}`
+		`## ${description}`
 	].join("\n");
 	await message.channel.send(content);
 }
@@ -706,7 +708,7 @@ async function sendError(message: Message, error: string) {
 	await message.react('❌');
 	const content = [
 		`-# ❌ Lỗi`,
-		`### ${error}`
+		`## ${error}`
 	].join("\n");
 	await message.reply(content);
 }
