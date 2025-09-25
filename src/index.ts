@@ -524,7 +524,7 @@ async function playVideo(message: Message, videoSource: string, title?: string, 
 
 			if (voiceChannel?.type === 'GUILD_VOICE' || voiceChannel?.type === 'GUILD_STAGE_VOICE') {
 				//voiceChannel.status = `📽 ${title}`;
-				await updateVoiceStatus(channelId, `📽  ${title}`);
+				await updateVoiceStatus(channelId, `📽 ${title}`);
 			}
 		}
 
