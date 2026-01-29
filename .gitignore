@@ -2,6 +2,7 @@ LICENSE
 node_modules/
 dist/
 .env
+.env.prod
 bun.lockb
 videos/
 tmp/

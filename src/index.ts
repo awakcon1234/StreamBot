@@ -662,7 +662,7 @@ const status_idle = () => {
 const status_watch = (name: string) => {
 	return new CustomStatus(new Client())
 		.setEmoji('📽')
-		.setState(`Đang phát ${name}...`)
+		.setState(`Đang phát ${name.substring(0, 112)}...`)
 }
 
 async function updateVoiceStatus(channelId: string, status: string) {
