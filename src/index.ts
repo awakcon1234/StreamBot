@@ -25,8 +25,17 @@ import https from 'https';
 // Create a new instance of Streamer
 const streamer = new Streamer(new Client());
 
-// Declare a controller to abort the stream
-let controller: AbortController;
+// Declare controllers per guild to abort streams
+const controllerMap = new Map<string, AbortController>();
+const queueMap = new Map<string, QueueItem[]>();
+
+type QueueItem = {
+	message: Message;
+	source: string;
+	title?: string;
+	initialMessage?: Message | null;
+	voiceChannelId: string;
+};
 
 // Create a new instance of Youtube
 const youtube = new Youtube();
@@ -68,6 +77,99 @@ let videos = videoFiles.map(file => {
 	return { name: fileName.replace(/ /g, '_'), path: path.join(config.videosDir, file) };
 });
 
+async function enqueueOrPlay(item: QueueItem, status: StreamStatus) {
+	const guildId = item.message.guild?.id || "";
+	if (!guildId) {
+		await sendError(item.message, 'Không thể xác định máy chủ.');
+		return;
+	}
+
+	if (status.joined || status.playing) {
+		const queue = queueMap.get(guildId) ?? [];
+		queue.push(item);
+		queueMap.set(guildId, queue);
+		await sendSuccess(item.message, `Đã thêm vào hàng đợi (#${queue.length}).`);
+		return;
+	}
+
+	await playVideo(item.message, item.source, item.title, item.initialMessage ?? undefined, item.voiceChannelId);
+}
+
+async function startNextInQueue(guildId: string) {
+	const queue = queueMap.get(guildId);
+	if (!queue || queue.length === 0) return;
+	const next = queue.shift()!;
+	queueMap.set(guildId, queue);
+	const status = getStreamStatus(guildId);
+	await playVideo(next.message, next.source, next.title, next.initialMessage ?? undefined, next.voiceChannelId);
+}
+
+async function handleUrlPlay(message: Message, link: string, status: StreamStatus) {
+	const voiceChannelId = message.member?.voice?.channelId || "";
+	if (!voiceChannelId) {
+		await sendError(message, 'Bạn cần vào kênh thoại trước khi phát video.');
+		return;
+	}
+
+	let title: string | undefined = undefined;
+	let source = link;
+
+	if (link.includes('youtube.com/') || link.includes('youtu.be/')) {
+		try {
+			const videoDetails = await youtube.getVideoInfo(link);
+			if (videoDetails?.title) {
+				title = videoDetails.title;
+			}
+		} catch (error) {
+			logger.error(`Lỗi khi xử lý liên kết YouTube: ${link}`, error);
+		}
+	} else if (link.includes('twitch.tv')) {
+		const twitchId = link.split('/').pop() as string;
+		const twitchUrl = await getTwitchStreamUrl(link);
+		if (twitchUrl) {
+			source = twitchUrl;
+			title = `twitch.tv/${twitchId}`;
+		} else {
+			await sendError(message, 'Không thể lấy URL Twitch.');
+			return;
+		}
+	} else {
+		try {
+			title = new URL(link).hostname;
+		} catch {
+			title = "URL";
+		}
+	}
+
+	if (status.joined || status.playing) {
+		await enqueueOrPlay({
+			message,
+			source,
+			title,
+			voiceChannelId
+		}, status);
+		return;
+	}
+
+	const prepMessageContent = [
+		`-# 📥 Đang chuẩn bị video...`,
+		`> **${title || new URL(link).hostname}**`
+	].join("\n");
+
+	const prepMessage = await message.reply(prepMessageContent).catch(e => {
+		logger.warn("Gửi thông báo 'Đang tải...' thất bại:", e);
+		return null;
+	});
+
+	await enqueueOrPlay({
+		message,
+		source,
+		title,
+		initialMessage: prepMessage,
+		voiceChannelId
+	}, status);
+}
+
 // print out all videos
 logger.info(`Các video có sẵn:\n${videos.map(m => m.name).join('\n')}`);
 
@@ -79,16 +181,49 @@ streamer.client.on("ready", async () => {
 	}
 });
 
-// Stream status object
-const streamStatus = {
+type StreamStatus = {
+	joined: boolean;
+	joinsucc: boolean;
+	playing: boolean;
+	manualStop: boolean;
+	channelInfo: {
+		guildId: string;
+		channelId: string;
+		cmdChannelId: string;
+	};
+};
+
+const streamStatusMap = new Map<string, StreamStatus>();
+
+const createDefaultStreamStatus = (guildId: string): StreamStatus => ({
 	joined: false,
 	joinsucc: false,
 	playing: false,
 	manualStop: false,
 	channelInfo: {
-		guildId: config.guildId,
-		channelId: config.videoChannelId,
-		cmdChannelId: config.cmdChannelId
+		guildId,
+		channelId: "",
+		cmdChannelId: ""
+	}
+});
+
+function getStreamStatus(guildId: string): StreamStatus {
+	if (!streamStatusMap.has(guildId)) {
+		streamStatusMap.set(guildId, createDefaultStreamStatus(guildId));
+	}
+	return streamStatusMap.get(guildId)!;
+}
+
+function resetStreamStatus(guildId: string) {
+	streamStatusMap.set(guildId, createDefaultStreamStatus(guildId));
+}
+
+function isUrl(input: string): boolean {
+	try {
+		const parsed = new URL(input);
+		return parsed.protocol === "http:" || parsed.protocol === "https:";
+	} catch {
+		return false;
 	}
 }
 
@@ -97,14 +232,7 @@ streamer.client.on('voiceStateUpdate', async (oldState, newState) => {
 	// When exit channel
 	if (oldState.member?.user.id == streamer.client.user?.id) {
 		if (oldState.channelId && !newState.channelId) {
-			streamStatus.joined = false;
-			streamStatus.joinsucc = false;
-			streamStatus.playing = false;
-			streamStatus.channelInfo = {
-				guildId: config.guildId,
-				channelId: config.videoChannelId,
-				cmdChannelId: config.cmdChannelId
-			}
+			resetStreamStatus(oldState.guild.id);
 			streamer.client.user?.setActivity(status_idle() as ActivityOptions);
 		}
 	}
@@ -112,9 +240,10 @@ streamer.client.on('voiceStateUpdate', async (oldState, newState) => {
 	// When join channel success
 	if (newState.member?.user.id == streamer.client.user?.id) {
 		if (newState.channelId && !oldState.channelId) {
-			streamStatus.joined = true;
-			if (newState.guild.id == streamStatus.channelInfo.guildId && newState.channelId == streamStatus.channelInfo.channelId) {
-				streamStatus.joinsucc = true;
+			const status = getStreamStatus(newState.guild.id);
+			status.joined = true;
+			if (newState.guild.id == status.channelInfo.guildId && newState.channelId == status.channelInfo.channelId) {
+				status.joinsucc = true;
 			}
 		}
 	}
@@ -125,7 +254,7 @@ streamer.client.on('messageCreate', async (message) => {
 	if (
 		message.author.bot ||
 		message.author.id === streamer.client.user?.id ||
-		!config.cmdChannelId.includes(message.channel.id.toString()) ||
+		!config.cmdChannelIds.includes(message.channel.id.toString()) ||
 		!message.content.startsWith(config.prefix!)
 	) return; // Ignore bots, self, non-command channels, and non-commands
 
@@ -134,21 +263,39 @@ streamer.client.on('messageCreate', async (message) => {
 	if (args.length === 0) return; // No arguments provided
 
 	const user_cmd = args.shift()!.toLowerCase();
+	const guildId = message.guild?.id || "";
+	const status = guildId ? getStreamStatus(guildId) : null;
 
-	if (config.cmdChannelId.includes(message.channel.id)) {
-		switch (user_cmd) {
+	switch (user_cmd) {
 			case 'play':
 				{
-					if (streamStatus.joined) {
-						sendError(message, 'Bot hiện đang ở trong kênh thoại');
+					if (!status) {
+						await sendError(message, 'Không thể xác định máy chủ.');
 						return;
 					}
+					const input = args.shift();
+					if (!input) {
+						await sendError(message, 'Vui lòng cung cấp video hoặc liên kết.');
+						return;
+					}
+
+					if (isUrl(input)) {
+						await handleUrlPlay(message, input, status);
+						return;
+					}
+
 					// Get video name and find video file
-					const videoname = args.shift()
+					const videoname = input;
 					const video = videos.find(m => m.name == videoname);
 
 					if (!video) {
 						await sendError(message, 'Không tìm thấy video');
+						return;
+					}
+
+					const voiceChannelId = message.member?.voice?.channelId || "";
+					if (!voiceChannelId) {
+						await sendError(message, 'Bạn cần vào kênh thoại trước khi phát video.');
 						return;
 					}
 
@@ -179,14 +326,18 @@ streamer.client.on('messageCreate', async (message) => {
 					// Log playing video
 					logger.info(`Phát video cục bộ: ${video.path}`);
 
-					// Play video
-					playVideo(message, video.path, videoname);
+					await enqueueOrPlay({
+						message,
+						source: video.path,
+						title: videoname,
+						voiceChannelId
+					}, status);
 				}
 				break;
 			case 'playlink':
 				{
-					if (streamStatus.joined) {
-						sendError(message, 'Bot hiện đang ở trong kênh thoại');
+					if (!status) {
+						await sendError(message, 'Không thể xác định máy chủ.');
 						return;
 					}
 
@@ -197,52 +348,15 @@ streamer.client.on('messageCreate', async (message) => {
 						return;
 					}
 
-					const prepMessageContent = [
-						`-# 📥 Đang chuẩn bị video...`,
-						`> **${(new URL(link)).hostname}**`
-					].join("\n");
-
-					const prepMessage = await message.reply(prepMessageContent).catch(e => {
-						logger.warn("Gửi thông báo 'Đang tải...' thất bại:", e);
-						return null;
-					});
-
-					switch (true) {
-						case (link.includes('youtube.com/') || link.includes('youtu.be/')):
-							{
-								try {
-									const videoDetails = await youtube.getVideoInfo(link);
-
-									if (videoDetails && videoDetails.title) {
-										playVideo(message, link, videoDetails.title, prepMessage);
-									} else {
-										logger.error(`Không thể lấy thông tin video YouTube cho liên kết: ${link}.`);
-										await sendError(message, 'Xử lý liên kết YouTube thất bại.');
-									}
-								} catch (error) {
-									logger.error(`Lỗi khi xử lý liên kết YouTube: ${link}`, error);
-									await sendError(message, 'Xử lý liên kết YouTube thất bại.');
-								}
-							}
-							break;
-						case link.includes('twitch.tv'):
-							{
-								const twitchId = link.split('/').pop() as string;
-								const twitchUrl = await getTwitchStreamUrl(link);
-								if (twitchUrl) {
-									playVideo(message, twitchUrl, `twitch.tv/${twitchId}`, prepMessage);
-								}
-							}
-							break;
-						default:
-							{
-								playVideo(message, link, "URL", prepMessage);
-							}
-					}
+					await handleUrlPlay(message, link, status);
 				}
 				break;
 			case 'ytplay':
 				{
+					if (!status) {
+						await sendError(message, 'Không thể xác định máy chủ.');
+						return;
+					}
 					const title = args.length > 1 ? args.slice(1).join(' ') : args[1] || args.shift() || '';
 
 					if (!title) {
@@ -257,14 +371,24 @@ streamer.client.on('messageCreate', async (message) => {
 						const searchResult = await youtube.searchAndGetPageUrl(title);
 
 						if (searchResult.pageUrl && searchResult.title) {
-							playVideo(message, searchResult.pageUrl, searchResult.title);
+							const voiceChannelId = message.member?.voice?.channelId || "";
+							if (!voiceChannelId) {
+								await sendError(message, 'Bạn cần vào kênh thoại trước khi phát video.');
+								return;
+							}
+							await enqueueOrPlay({
+								message,
+								source: searchResult.pageUrl,
+								title: searchResult.title,
+								voiceChannelId
+							}, status);
 						} else {
 							logger.warn(`Không tìm thấy video hoặc tiêu đề bị thiếu cho tìm kiếm: "${title}" sử dụng youtube.searchAndGetPageUrl.`);
 							throw new Error('Could not find video');
 						}
 					} catch (error) {
 						logger.error('Không thể phát video YouTube:', error);
-						await cleanupStreamStatus();
+						await cleanupStreamStatus(guildId);
 						await sendError(message, 'Không thể phát video. Vui lòng thử lại.');
 					}
 				}
@@ -291,14 +415,19 @@ streamer.client.on('messageCreate', async (message) => {
 				break;
 			case 'stop':
 				{
-					if (!streamStatus.joined) {
+					if (!status) {
+						await sendError(message, 'Không thể xác định máy chủ.');
+						return;
+					}
+					if (!status.joined) {
 						sendError(message, 'Đã dừng rồi!');
 						return;
 					}
 
 					try {
-						streamStatus.manualStop = true;
+						status.manualStop = true;
 
+						const controller = controllerMap.get(guildId);
 						controller?.abort();
 
 						await sendSuccess(message, 'Đã dừng phát video.');
@@ -308,24 +437,73 @@ streamer.client.on('messageCreate', async (message) => {
 						streamer.leaveVoice();
 						streamer.client.user?.setActivity(status_idle() as ActivityOptions);
 
-						const voiceChannel = streamer.client.channels.cache.get(streamStatus.channelInfo.channelId);
+						const voiceChannel = streamer.client.channels.cache.get(status.channelInfo.channelId);
 						if (voiceChannel?.type === 'GUILD_VOICE' || voiceChannel?.type === 'GUILD_STAGE_VOICE') {
 							//voiceChannel.status = "";
-							await updateVoiceStatus(streamStatus.channelInfo.channelId, "");
+							await updateVoiceStatus(status.channelInfo.channelId, "");
 						}
 
-						streamStatus.joined = false;
-						streamStatus.joinsucc = false;
-						streamStatus.playing = false;
-						streamStatus.channelInfo = {
-							guildId: "",
-							channelId: "",
-							cmdChannelId: "",
-						};
+						resetStreamStatus(guildId);
+						controllerMap.delete(guildId);
+						queueMap.delete(guildId);
 
 					} catch (error) {
 						logger.error('Lỗi khi dừng cưỡng bức:', error);
 					}
+				}
+				break;
+			case 'skip':
+				{
+					if (!status) {
+						await sendError(message, 'Không thể xác định máy chủ.');
+						return;
+					}
+					const guildQueue = queueMap.get(guildId) ?? [];
+					if (!status.joined && guildQueue.length === 0) {
+						await sendError(message, 'Không có gì để bỏ qua.');
+						return;
+					}
+
+					try {
+						status.manualStop = true;
+						const controller = controllerMap.get(guildId);
+						controller?.abort();
+						await cleanupStreamStatus(guildId);
+						await startNextInQueue(guildId);
+						await sendSuccess(message, 'Đã chuyển sang video tiếp theo.');
+					} catch (error) {
+						logger.error('Lỗi khi bỏ qua video:', error);
+						await sendError(message, 'Không thể bỏ qua video.');
+					}
+				}
+				break;
+			case 'queue':
+				{
+					const guildQueue = queueMap.get(guildId) ?? [];
+					if (guildQueue.length === 0) {
+						await sendInfo(message, 'Hàng đợi', 'Không có video trong hàng đợi.');
+						return;
+					}
+					const lines = guildQueue.map((item, index) => {
+						const name = item.title || item.source;
+						return `${index + 1}. ${name}`;
+					});
+					await sendList(message, lines, "queue");
+				}
+				break;
+			case 'remove':
+				{
+					const guildQueue = queueMap.get(guildId) ?? [];
+					const indexRaw = args.shift();
+					const index = indexRaw ? parseInt(indexRaw, 10) : NaN;
+					if (!indexRaw || Number.isNaN(index) || index < 1 || index > guildQueue.length) {
+						await sendError(message, 'Vui lòng cung cấp số thứ tự hợp lệ trong hàng đợi.');
+						return;
+					}
+
+					const removed = guildQueue.splice(index - 1, 1)[0];
+					queueMap.set(guildId, guildQueue);
+					await sendSuccess(message, `Đã xóa: ${removed.title || removed.source}`);
 				}
 				break;
 			case 'list':
@@ -340,8 +518,12 @@ streamer.client.on('messageCreate', async (message) => {
 				break;
 			case 'status':
 				{
+					if (!status) {
+						await sendError(message, 'Không thể xác định máy chủ.');
+						return;
+					}
 					await sendInfo(message, 'Trạng thái',
-						`Đã tham gia: ${streamStatus.joined}\nĐang phát: ${streamStatus.playing}`);
+						`Đã tham gia: ${status.joined}\nĐang phát: ${status.playing}`);
 				}
 				break;
 			case 'refresh':
@@ -413,11 +595,14 @@ streamer.client.on('messageCreate', async (message) => {
 						`\`${config.prefix}playlink\` - Phát video từ URL/YouTube/Twitch`,
 						`\`${config.prefix}ytplay\` - Phát video từ YouTube`,
 						`\`${config.prefix}stop\` - Dừng phát`,
+						`\`${config.prefix}skip\` - Bỏ qua và phát tiếp`,
 						'',
 						'🛠️ **Công cụ**',
 						`\`${config.prefix}list\` - Hiện danh sách video offline`,
 						`\`${config.prefix}refresh\` - Cập nhật danh sách video`,
 						`\`${config.prefix}status\` - Hiện trạng thái phát`,
+						`\`${config.prefix}queue\` - Xem hàng đợi`,
+						`\`${config.prefix}remove <#>\` - Xóa khỏi hàng đợi`,
 						`\`${config.prefix}preview\` - Xem trước video`,
 						'',
 						'🔍 **Tìm kiếm**',
@@ -436,20 +621,33 @@ streamer.client.on('messageCreate', async (message) => {
 				{
 					await sendError(message, 'Lệnh không hợp lệ');
 				}
-		}
 	}
 });
 
 // Function to play video
-async function playVideo(message: Message, videoSource: string, title?: string, initialMessage?: Message) {
-	const [guildId, channelId, cmdChannelId] = [config.guildId, config.videoChannelId, config.cmdChannelId!];
+async function playVideo(message: Message, videoSource: string, title?: string, initialMessage?: Message, targetVoiceChannelId?: string) {
+	const guildId = message.guild?.id || "";
+	const channelId = targetVoiceChannelId || message.member?.voice?.channelId || "";
+	const cmdChannelId = message.channel.id;
 
-	streamStatus.manualStop = false;
+	if (!guildId) {
+		await sendError(message, "Không thể xác định máy chủ để phát video.");
+		return;
+	}
+	const status = getStreamStatus(guildId);
+
+	if (!channelId) {
+		await sendError(message, "Bạn cần vào kênh thoại trước khi phát video.");
+		return;
+	}
+
+	status.manualStop = false;
 
 	let inputForFfmpeg: any = videoSource;
 	let tempFilePath: string | null = null;
 	let downloadInProgressMessage: Message | null = null;
 	let isLiveYouTubeStream = false;
+	let controller: AbortController | undefined;
 
 	try {
 		if (typeof videoSource === 'string' && (videoSource.includes('youtube.com/') || videoSource.includes('youtu.be/'))) {
@@ -465,7 +663,7 @@ async function playVideo(message: Message, videoSource: string, title?: string, 
 				} else {
 					logger.error(`Không thể lấy URL luồng trực tiếp cho ${title || videoSource}.`);
 					await sendError(message, `Không thể lấy URL luồng trực tiếp cho \`${title || 'YouTube live video'}\`.`);
-					await cleanupStreamStatus();
+					await cleanupStreamStatus(guildId);
 					return;
 				}
 			} else {
@@ -507,16 +705,16 @@ async function playVideo(message: Message, videoSource: string, title?: string, 
 					} else {
 						await sendError(message, `Tải xuống video thất bại: ${downloadError instanceof Error ? downloadError.message : String(downloadError)}`);
 					}
-					await cleanupStreamStatus();
+					await cleanupStreamStatus(guildId);
 					return;
 				}
 			}
 		}
 
 		await streamer.joinVoice(guildId, channelId);
-		streamStatus.joined = true;
-		streamStatus.playing = true;
-		streamStatus.channelInfo = { guildId, channelId, cmdChannelId };
+		status.joined = true;
+		status.playing = true;
+		status.channelInfo = { guildId, channelId, cmdChannelId };
 
 		if (title) {
 			streamer.client.user?.setActivity(status_watch(title) as ActivityOptions);
@@ -530,8 +728,10 @@ async function playVideo(message: Message, videoSource: string, title?: string, 
 
 		await sendPlaying(message, title || videoSource);
 
-		controller?.abort();
-		controller = new AbortController();
+		const existingController = controllerMap.get(guildId);
+		existingController?.abort();
+		const controller = new AbortController();
+		controllerMap.set(guildId, controller);
 
 		if (!controller) {
 			throw new Error('Bộ điều khiển chưa được khởi tạo');
@@ -540,7 +740,7 @@ async function playVideo(message: Message, videoSource: string, title?: string, 
 
 		command.on("error", (err, stdout, stderr) => {
 			// Don't log error if it's due to manual stop
-			if (!streamStatus.manualStop && controller && !controller.signal.aborted) {
+			if (!status.manualStop && controller && !controller.signal.aborted) {
 				logger.error('Lỗi xảy ra với ffmpeg:', err.message);
 				if (stdout) {
 					logger.error('ffmpeg stdout:', stdout);
@@ -568,11 +768,15 @@ async function playVideo(message: Message, videoSource: string, title?: string, 
 		logger.error(`Lỗi trong playVideo cho ${title || videoSource}:`, error);
 		if (controller && !controller.signal.aborted) controller.abort();
 	} finally {
-		if (!streamStatus.manualStop && controller && !controller.signal.aborted) {
-			await sendFinishMessage();
+		const shouldStartNext = !status.manualStop;
+		if (!status.manualStop && controller && !controller.signal.aborted) {
+			await sendFinishMessage(guildId);
 		}
 
-		await cleanupStreamStatus();
+		await cleanupStreamStatus(guildId);
+		if (shouldStartNext) {
+			await startNextInQueue(guildId);
+		}
 
 		if (tempFilePath && !isLiveYouTubeStream) {
 			try {
@@ -585,35 +789,31 @@ async function playVideo(message: Message, videoSource: string, title?: string, 
 }
 
 // Function to cleanup stream status
-async function cleanupStreamStatus() {
-	if (streamStatus.manualStop) {
+
+async function cleanupStreamStatus(guildId: string) {
+	const status = getStreamStatus(guildId);
+	if (status.manualStop) {
 		return;
 	}
 
 	try {
+		const controller = controllerMap.get(guildId);
 		controller?.abort();
 		streamer.stopStream();
 		streamer.leaveVoice();
 
 		streamer.client.user?.setActivity(status_idle() as ActivityOptions);
 
-		const voiceChannel = streamer.client.channels.cache.get(streamStatus.channelInfo.channelId);
+		const voiceChannel = streamer.client.channels.cache.get(status.channelInfo.channelId);
 
 		if (voiceChannel?.type === 'GUILD_VOICE' || voiceChannel?.type === 'GUILD_STAGE_VOICE') {
 			//voiceChannel.status = "";
-			await updateVoiceStatus(streamStatus.channelInfo.channelId, "");
+			await updateVoiceStatus(status.channelInfo.channelId, "");
 		}
 
 		// Reset all status flags
-		streamStatus.joined = false;
-		streamStatus.joinsucc = false;
-		streamStatus.playing = false;
-		streamStatus.manualStop = false;
-		streamStatus.channelInfo = {
-			guildId: "",
-			channelId: "",
-			cmdChannelId: "",
-		};
+		resetStreamStatus(guildId);
+		controllerMap.delete(guildId);
 	} catch (error) {
 		logger.error('Lỗi khi dọn dẹp:', error);
 	}
@@ -725,8 +925,10 @@ async function sendPlaying(message: Message, title: string) {
 }
 
 // Function to send finish message
-async function sendFinishMessage() {
-	const channel = streamer.client.channels.cache.get(config.cmdChannelId.toString()) as TextChannel;
+async function sendFinishMessage(guildId: string) {
+	const channelId = getStreamStatus(guildId).channelInfo.cmdChannelId;
+	if (!channelId) return;
+	const channel = streamer.client.channels.cache.get(channelId.toString()) as TextChannel;
 	if (channel) {
 		const content = [
 			`-# ⏹️ Ngắt kết nối`,
@@ -748,6 +950,12 @@ async function sendList(message: Message, items: string[], type?: string) {
 	} else if (type == "refresh") {
 		const content = [
 			`-# 📋 Đã làm mới danh sách video`,
+			items.map(i => `- ${i}`).join('\n')
+		].join("\n");
+		await message.reply(content);
+	} else if (type == "queue") {
+		const content = [
+			`-# 📋 Hàng đợi phát`,
 			items.map(i => `- ${i}`).join('\n')
 		].join("\n");
 		await message.reply(content);

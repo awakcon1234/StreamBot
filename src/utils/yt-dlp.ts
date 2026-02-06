@@ -41,6 +41,28 @@ if (platform === "win32") {
 const filename = determinedFilename;
 const scriptsPath = nodePath.resolve(process.cwd(), "scripts");
 const exePath = nodePath.resolve(scriptsPath, filename);
+const systemExecutablePath = findSystemExecutable();
+
+function findSystemExecutable(): string | null {
+    const envPath = process.env.PATH || "";
+    const pathSeparator = platform === "win32" ? ";" : ":";
+    const candidates = platform === "win32" ? ["yt-dlp.exe", "yt-dlp"] : ["yt-dlp"];
+
+    for (const dir of envPath.split(pathSeparator)) {
+        for (const candidate of candidates) {
+            const candidatePath = nodePath.join(dir, candidate);
+            if (candidatePath && existsSync(candidatePath)) {
+                return candidatePath;
+            }
+        }
+    }
+
+    return null;
+}
+
+function getExecutablePath(): string {
+    return systemExecutablePath || exePath;
+}
 
 function args(url: string, options: Partial<YTFlags>): string[] {
     const optArgs: string[] = [];
@@ -81,6 +103,11 @@ function json(str: string) {
 }
 
 export async function downloadExecutable() {
+    if (systemExecutablePath) {
+        logger.info(`yt-dlp found in PATH at ${systemExecutablePath}; skipping bundled download.`);
+        return;
+    }
+
     if (!existsSync(exePath)) {
         logger.info("Yt-dlp couldn't be found, trying to download...");
         const releases = await got.get("https://api.github.com/repos/yt-dlp/yt-dlp/releases?per_page=1").json();
@@ -98,7 +125,7 @@ export async function downloadExecutable() {
 }
 
 export function exec(url: string, options: Partial<YTFlags> = {}, spawnOptions: Record<string, any> = {}) {
-    return spawn(exePath, args(url, options), {
+    return spawn(getExecutablePath(), args(url, options), {
         windowsHide: true,
         ...spawnOptions,
         stdio: ["ignore", "pipe", "pipe"]
@@ -150,7 +177,7 @@ export async function downloadToTempFile(url: string, options: Partial<YTFlags> 
         noWarnings: true,
     };
 
-    const proc = spawn(exePath, args(url, downloadOptions), {
+    const proc = spawn(getExecutablePath(), args(url, downloadOptions), {
         windowsHide: true,
         stdio: ["ignore", "ignore", "pipe"]
     });
@@ -189,8 +216,13 @@ export async function downloadToTempFile(url: string, options: Partial<YTFlags> 
 
 export async function checkForUpdatesAndUpdate(): Promise<void> {
     try {
+        if (systemExecutablePath) {
+            logger.info(`yt-dlp found in PATH at ${systemExecutablePath}; skipping self-update.`);
+            return;
+        }
+
         await downloadExecutable();
-        const updateProc = spawn(exePath, ["--update"], {
+        const updateProc = spawn(getExecutablePath(), ["--update"], {
             stdio: ["ignore", "pipe", "pipe"],
         });
 

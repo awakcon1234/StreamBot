@@ -9,9 +9,7 @@ export default {
     // Selfbot options
     token: process.env.TOKEN || '',
     prefix: process.env.PREFIX || '',
-    guildId: process.env.GUILD_ID ? process.env.GUILD_ID : '',
-    cmdChannelId: process.env.COMMAND_CHANNEL_ID ? process.env.COMMAND_CHANNEL_ID : '',
-    videoChannelId: process.env.VIDEO_CHANNEL_ID ? process.env.VIDEO_CHANNEL_ID : '',
+    cmdChannelIds: process.env.COMMAND_CHANNEL_ID ? parseIdList(process.env.COMMAND_CHANNEL_ID) : [],
 
     // General options
     videosDir: process.env.VIDEOS_DIR ? process.env.VIDEOS_DIR : './videos',
@@ -78,4 +76,12 @@ function parseBoolean(value: string | undefined): boolean {
         default:
             return false;
     }
+}
+
+function parseIdList(value: string): string[] {
+    if (typeof value !== "string") return [];
+    return value
+        .split(",")
+        .map(item => item.trim())
+        .filter(item => item.length > 0);
 }

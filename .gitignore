@@ -8,3 +8,4 @@ videos/
 tmp/
 *.sock
 scripts/yt-dlp.exe
+cookies.txt

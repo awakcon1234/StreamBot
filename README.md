@@ -114,9 +114,7 @@ Configuration is done via `.env`:
 # Selfbot options
 TOKEN = "" # Your Discord self-bot token
 PREFIX = "$" # The prefix used to trigger your self-bot commands
-GUILD_ID = "" # The ID of the Discord server your self-bot will be running on
-COMMAND_CHANNEL_ID = "" # The ID of the Discord channel where your self-bot will respond to commands
-VIDEO_CHANNEL_ID = "" # The ID of the Discord voice/video channel where your self-bot will stream videos
+COMMAND_CHANNEL_ID = "" # Comma-separated IDs of channels where your self-bot will respond to commands
 
 # General options
 VIDEOS_DIR = "./videos" # The local path where you store video files
@@ -150,6 +148,8 @@ SERVER_USERNAME = "admin" # The username for the video server's admin interface
 SERVER_PASSWORD = "admin" # The password for the video server's admin interface
 SERVER_PORT = "8080" # The port number the video server will listen on
 ```
+
+When a playback command is executed, the bot will join the voice channel that the command executor is currently connected to.
 
 ### Using Cookies with yt-dlp
 
