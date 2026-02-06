@@ -74,4 +74,34 @@ export class Youtube {
             return null;
         }
     }
+
+    async getPlaylistEntries(playlistUrl: string): Promise<{ title: string; url: string }[]> {
+        try {
+            const data = await ytdl_dlp(playlistUrl, {
+                dumpSingleJson: true,
+                flatPlaylist: true,
+                yesPlaylist: true,
+                quiet: true,
+                noWarnings: true,
+            }) as any;
+
+            const entries = Array.isArray(data?.entries) ? data.entries : [];
+            const results: { title: string; url: string }[] = [];
+
+            for (const entry of entries) {
+                const id = entry?.id || entry?.url;
+                if (!id) continue;
+                const url = typeof entry?.url === "string" && entry.url.startsWith("http")
+                    ? entry.url
+                    : `https://www.youtube.com/watch?v=${id}`;
+                const title = entry?.title || `YouTube video ${id}`;
+                results.push({ title, url });
+            }
+
+            return results;
+        } catch (error) {
+            logger.error(`Failed to get playlist entries using yt-dlp for ${playlistUrl}:`, error);
+            return [];
+        }
+    }
 }
