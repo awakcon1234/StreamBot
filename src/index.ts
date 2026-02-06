@@ -896,10 +896,6 @@ async function playVideo(message: Message, videoSource: string, title?: string, 
 
 async function cleanupStreamStatus(guildId: string) {
 	const status = getStreamStatus(guildId);
-	if (status.manualStop) {
-		return;
-	}
-
 	try {
 		const controller = controllerMap.get(guildId);
 		controller?.abort();
