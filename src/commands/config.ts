@@ -41,11 +41,14 @@ export default class ConfigCommand extends BaseCommand {
 		const configInfo = [
 			"**Stream Options:**",
 			`• respect_video_params: ${config.respect_video_params}`,
+			`• bitrateOverride: ${config.bitrateOverride}`,
 			`• width: ${config.width}`,
 			`• height: ${config.height}`,
 			`• fps: ${config.fps}`,
 			`• bitrateKbps: ${config.bitrateKbps}`,
 			`• maxBitrateKbps: ${config.maxBitrateKbps}`,
+			`• maxWidth: ${config.maxWidth || 'None'}`,
+			`• maxHeight: ${config.maxHeight || 'None'}`,
 			`• hardwareAcceleratedDecoding: ${config.hardwareAcceleratedDecoding}`,
 			`• h26xPreset: ${config.h26xPreset}`,
 			`• videoCodec: ${config.videoCodec}`,
@@ -90,6 +93,7 @@ export default class ConfigCommand extends BaseCommand {
 			switch (key) {
 				// Boolean parameters
 				case 'respect_video_params':
+				case 'bitrateOverride':
 				case 'hardwareAcceleratedDecoding':
 					const boolValue = parseBoolean(value);
 					(config as any)[key] = boolValue;
@@ -103,11 +107,22 @@ export default class ConfigCommand extends BaseCommand {
 				case 'fps':
 				case 'bitrateKbps':
 				case 'maxBitrateKbps':
+				case 'maxWidth':
+				case 'maxHeight':
 					const numValue = parseInt(value);
-					if (isNaN(numValue) || numValue <= 0) {
-						await this.sendError(context.message, `Invalid number value: ${value}`);
+					
+					// Validate non-negative
+					if (isNaN(numValue) || numValue < 0) {
+						await this.sendError(context.message, `Invalid number value: ${value}. Must be non-negative.`);
 						return;
 					}
+					
+					// Validate positive for essential params
+					if (['width', 'height', 'fps', 'bitrateKbps', 'maxBitrateKbps'].includes(key) && numValue === 0) {
+						await this.sendError(context.message, `Invalid number value: ${value}. Must be greater than 0.`);
+						return;
+					}
+
 					(config as any)[key] = numValue;
 					await this.sendSuccess(context.message, `Set ${key} to \`${numValue}\``);
 					logger.info(`Config updated: ${key} = ${numValue}`);

@@ -242,8 +242,11 @@ YTDLP_COOKIES_PATH=""
 ```bash
 # Video Quality Settings
 STREAM_RESPECT_VIDEO_PARAMS="false"  # Use original video parameters if true
+STREAM_BITRATE_OVERRIDE="false"      # If true, use STREAM_BITRATE_KBPS even when respecting video params
 STREAM_WIDTH="1280"                  # Output resolution width
 STREAM_HEIGHT="720"                  # Output resolution height
+STREAM_MAX_WIDTH="0"                 # Max width cap (0 = disabled)
+STREAM_MAX_HEIGHT="0"                # Max height cap (0 = disabled)
 STREAM_FPS="30"                      # Target frame rate
 
 # Bitrate Settings (affects quality and bandwidth usage)

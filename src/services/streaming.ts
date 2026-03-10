@@ -152,14 +152,21 @@ export class StreamingService {
 		await this.playVideo(message, queueItem.url, queueItem.title, videoParams);
 	}
 
-	private async getVideoParameters(videoUrl: string): Promise<{ width: number, height: number, fps?: number, bitrate?: string } | undefined> {
+	private async getVideoParameters(videoUrl: string): Promise<{ width: number, height: number, fps?: number, bitrate?: number } | undefined> {
 		try {
 			const resolution = await getVideoParams(videoUrl);
-			logger.info(`Video parameters: ${resolution.width}x${resolution.height}, FPS: ${resolution.fps || 'unknown'}`);
+			logger.info(`Video parameters: ${resolution.width}x${resolution.height}, FPS: ${resolution.fps || 'unknown'}, Bitrate: ${resolution.bitrate || 'unknown'}`);
+			
+			let bitrateKbps: number | undefined;
+			if (resolution.bitrate) {
+				bitrateKbps = Math.round(parseInt(resolution.bitrate) / 1000);
+			}
+
 			return {
 				width: resolution.width,
 				height: resolution.height,
-				fps: resolution.fps
+				fps: resolution.fps,
+				bitrate: bitrateKbps
 			};
 		} catch (error) {
 			await ErrorUtils.handleError(error, 'determining video parameters');
@@ -189,12 +196,38 @@ export class StreamingService {
 		}
 	}
 
-	private setupStreamConfiguration(videoParams?: { width: number, height: number, fps?: number, bitrate?: string }): any {
+	private setupStreamConfiguration(videoParams?: { width: number, height: number, fps?: number, bitrate?: number }): any {
+		let width = videoParams?.width || config.width;
+		let height = videoParams?.height || config.height;
+		let frameRate = videoParams?.fps || config.fps;
+		let bitrateVideo = config.bitrateKbps;
+
+		// If respecting video params, use video bitrate unless overridden
+		if (videoParams && videoParams.bitrate && !config.bitrateOverride) {
+			bitrateVideo = videoParams.bitrate;
+		}
+
+		// Resolution capping
+		if (config.maxWidth > 0 || config.maxHeight > 0) {
+			const ratio = width / height;
+			if (config.maxWidth > 0 && width > config.maxWidth) {
+				width = config.maxWidth;
+				height = Math.round(width / ratio);
+			}
+			if (config.maxHeight > 0 && height > config.maxHeight) {
+				height = config.maxHeight;
+				width = Math.round(height * ratio);
+			}
+			// Ensure even dimensions
+			width = Math.round(width / 2) * 2;
+			height = Math.round(height / 2) * 2;
+		}
+
 		return {
-			width: videoParams?.width || config.width,
-			height: videoParams?.height || config.height,
-			frameRate: videoParams?.fps || config.fps,
-			bitrateVideo: config.bitrateKbps,
+			width,
+			height,
+			frameRate,
+			bitrateVideo,
 			bitrateVideoMax: config.maxBitrateKbps,
 			videoCodec: Utils.normalizeVideoCodec(config.videoCodec),
 			hardwareAcceleratedDecoding: config.hardwareAcceleratedDecoding,
@@ -337,7 +370,7 @@ export class StreamingService {
 		}
 	}
 
-	public async playVideo(message: Message, videoSource: string, title?: string, videoParams?: { width: number, height: number, fps?: number, bitrate?: string }): Promise<void> {
+	public async playVideo(message: Message, videoSource: string, title?: string, videoParams?: { width: number, height: number, fps?: number, bitrate?: number }): Promise<void> {
 		const [guildId, channelId] = [config.guildId, config.videoChannelId];
 		this.streamStatus.manualStop = false;
 

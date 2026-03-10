@@ -20,6 +20,9 @@ services:
 
       # Stream options
       STREAM_RESPECT_VIDEO_PARAMS: "false" # This option is used to respect video parameters such as width, height, fps, bitrate, and max bitrate.
+      STREAM_BITRATE_OVERRIDE: "false" # If true, use STREAM_BITRATE_KBPS even when respecting video params
+      STREAM_MAX_WIDTH: "0" # Max width cap (0 = disabled)
+      STREAM_MAX_HEIGHT: "0" # Max height cap (0 = disabled)
       STREAM_WIDTH: "1280" # The width of the video stream in pixels
       STREAM_HEIGHT: "720" # The height of the video stream in pixels
       STREAM_FPS: "30" # The frames per second (FPS) of the video stream
