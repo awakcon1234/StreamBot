@@ -27,6 +27,9 @@ COPY package.json ./
 # Install dependencies
 RUN bun install
 
+# Trust all packages
+RUN bun pm trust --all
+
 # Copy the rest of the application code
 COPY . .
 
