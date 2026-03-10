@@ -2,6 +2,9 @@ import { BaseCommand } from "./base.js";
 import { CommandContext } from "../types/index.js";
 import { MediaService } from "../services/media.js";
 import { ErrorUtils, GeneralUtils } from '../utils/shared.js';
+import fs from 'fs';
+import path from 'path';
+import config from "../config.js";
 
 export default class PlayCommand extends BaseCommand {
 	name = "play";
@@ -27,8 +30,17 @@ export default class PlayCommand extends BaseCommand {
 		if (GeneralUtils.isValidUrl(input)) {
 			await this.handleUrl(context, input);
 		} else {
-			// Try to find local video first
-			const video = context.videos.find(m => m.name === input);
+			// Refresh video list from disk before matching
+			const videoFiles = fs.readdirSync(config.videosDir);
+			const refreshedVideos = videoFiles.map(file => ({
+				name: path.parse(file).name,
+				path: path.join(config.videosDir, file)
+			}));
+			context.videos.length = 0;
+			context.videos.push(...refreshedVideos);
+
+			// Case-insensitive match
+			const video = context.videos.find(m => m.name.toLowerCase() === input.toLowerCase());
 
 			if (video) {
 				await this.handleLocalVideo(context, video);
