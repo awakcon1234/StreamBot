@@ -29,6 +29,33 @@ export default {
     h26xPreset: process.env.STREAM_H26X_PRESET ? parsePreset(process.env.STREAM_H26X_PRESET) : 'ultrafast',
     videoCodec: process.env.STREAM_VIDEO_CODEC ? parseVideoCodec(process.env.STREAM_VIDEO_CODEC) : 'H264',
 
+    // Safe profile options
+    twitchSafeProfileEnabled: process.env.STREAM_TWITCH_SAFE_PROFILE_ENABLED ? parseBoolean(process.env.STREAM_TWITCH_SAFE_PROFILE_ENABLED) : true,
+    twitchSafeWidth: process.env.STREAM_TWITCH_SAFE_WIDTH ? parseInt(process.env.STREAM_TWITCH_SAFE_WIDTH) : (process.env.STREAM_WIDTH ? parseInt(process.env.STREAM_WIDTH) : 1280),
+    twitchSafeHeight: process.env.STREAM_TWITCH_SAFE_HEIGHT ? parseInt(process.env.STREAM_TWITCH_SAFE_HEIGHT) : (process.env.STREAM_HEIGHT ? parseInt(process.env.STREAM_HEIGHT) : 720),
+    twitchSafeFps: process.env.STREAM_TWITCH_SAFE_FPS ? parseInt(process.env.STREAM_TWITCH_SAFE_FPS) : (process.env.STREAM_FPS ? parseInt(process.env.STREAM_FPS) : 30),
+    twitchSafeBitrateKbps: process.env.STREAM_TWITCH_SAFE_BITRATE_KBPS ? parseInt(process.env.STREAM_TWITCH_SAFE_BITRATE_KBPS) : (process.env.STREAM_BITRATE_KBPS ? parseInt(process.env.STREAM_BITRATE_KBPS) : 1000),
+    twitchSafeMaxBitrateKbps: process.env.STREAM_TWITCH_SAFE_MAX_BITRATE_KBPS ? parseInt(process.env.STREAM_TWITCH_SAFE_MAX_BITRATE_KBPS) : (process.env.STREAM_MAX_BITRATE_KBPS ? parseInt(process.env.STREAM_MAX_BITRATE_KBPS) : 2500),
+    twitchSafeVideoCodec: process.env.STREAM_TWITCH_SAFE_VIDEO_CODEC ? parseVideoCodec(process.env.STREAM_TWITCH_SAFE_VIDEO_CODEC) : (process.env.STREAM_VIDEO_CODEC ? parseVideoCodec(process.env.STREAM_VIDEO_CODEC) : 'H264'),
+    twitchSafeIncludeAudio: process.env.STREAM_TWITCH_SAFE_INCLUDE_AUDIO ? parseBoolean(process.env.STREAM_TWITCH_SAFE_INCLUDE_AUDIO) : false,
+
+    youtubeSafeProfileEnabled: process.env.STREAM_YOUTUBE_SAFE_PROFILE_ENABLED ? parseBoolean(process.env.STREAM_YOUTUBE_SAFE_PROFILE_ENABLED) : false,
+    youtubeSafeWidth: process.env.STREAM_YOUTUBE_SAFE_WIDTH ? parseInt(process.env.STREAM_YOUTUBE_SAFE_WIDTH) : (process.env.STREAM_WIDTH ? parseInt(process.env.STREAM_WIDTH) : 1280),
+    youtubeSafeHeight: process.env.STREAM_YOUTUBE_SAFE_HEIGHT ? parseInt(process.env.STREAM_YOUTUBE_SAFE_HEIGHT) : (process.env.STREAM_HEIGHT ? parseInt(process.env.STREAM_HEIGHT) : 720),
+    youtubeSafeFps: process.env.STREAM_YOUTUBE_SAFE_FPS ? parseInt(process.env.STREAM_YOUTUBE_SAFE_FPS) : (process.env.STREAM_FPS ? parseInt(process.env.STREAM_FPS) : 30),
+    youtubeSafeBitrateKbps: process.env.STREAM_YOUTUBE_SAFE_BITRATE_KBPS ? parseInt(process.env.STREAM_YOUTUBE_SAFE_BITRATE_KBPS) : (process.env.STREAM_BITRATE_KBPS ? parseInt(process.env.STREAM_BITRATE_KBPS) : 1000),
+    youtubeSafeMaxBitrateKbps: process.env.STREAM_YOUTUBE_SAFE_MAX_BITRATE_KBPS ? parseInt(process.env.STREAM_YOUTUBE_SAFE_MAX_BITRATE_KBPS) : (process.env.STREAM_MAX_BITRATE_KBPS ? parseInt(process.env.STREAM_MAX_BITRATE_KBPS) : 2500),
+    youtubeSafeVideoCodec: process.env.STREAM_YOUTUBE_SAFE_VIDEO_CODEC ? parseVideoCodec(process.env.STREAM_YOUTUBE_SAFE_VIDEO_CODEC) : (process.env.STREAM_VIDEO_CODEC ? parseVideoCodec(process.env.STREAM_VIDEO_CODEC) : 'H264'),
+    youtubeSafeIncludeAudio: process.env.STREAM_YOUTUBE_SAFE_INCLUDE_AUDIO ? parseBoolean(process.env.STREAM_YOUTUBE_SAFE_INCLUDE_AUDIO) : true,
+
+    retryProfileEnabled: process.env.STREAM_RETRY_PROFILE_ENABLED ? parseBoolean(process.env.STREAM_RETRY_PROFILE_ENABLED) : true,
+    retryWidth: process.env.STREAM_RETRY_WIDTH ? parseInt(process.env.STREAM_RETRY_WIDTH) : 1280,
+    retryHeight: process.env.STREAM_RETRY_HEIGHT ? parseInt(process.env.STREAM_RETRY_HEIGHT) : 720,
+    retryFps: process.env.STREAM_RETRY_FPS ? parseInt(process.env.STREAM_RETRY_FPS) : 30,
+    retryBitrateKbps: process.env.STREAM_RETRY_BITRATE_KBPS ? parseInt(process.env.STREAM_RETRY_BITRATE_KBPS) : 2500,
+    retryMaxBitrateKbps: process.env.STREAM_RETRY_MAX_BITRATE_KBPS ? parseInt(process.env.STREAM_RETRY_MAX_BITRATE_KBPS) : 4000,
+    retryIncludeAudio: process.env.STREAM_RETRY_INCLUDE_AUDIO ? parseBoolean(process.env.STREAM_RETRY_INCLUDE_AUDIO) : false,
+
     // Videos server options
     server_enabled: process.env.SERVER_ENABLED ? parseBoolean(process.env.SERVER_ENABLED) : false,
     server_username: process.env.SERVER_USERNAME ? process.env.SERVER_USERNAME : 'admin',

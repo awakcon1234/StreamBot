@@ -8,9 +8,16 @@ import yts from 'play-dl';
 import { getVideoParams, ffmpegScreenshot } from "./utils/ffmpeg.js";
 import logger from './utils/logger.js';
 import { downloadExecutable, downloadToTempFile, checkForUpdatesAndUpdate } from './utils/yt-dlp.js';
+import ytdl from './utils/yt-dlp.js';
 import { Youtube } from './utils/youtube.js';
 import { TwitchStream } from './@types/index.js';
 import https from 'https';
+import { WebSocket as WsWebSocket } from 'ws';
+
+if (!(globalThis as any).WebSocket) {
+	(globalThis as any).WebSocket = WsWebSocket;
+	logger.info('Đã thiết lập WebSocket polyfill cho môi trường Node.');
+}
 
 // Download yt-dlp and check for updates
 (async () => {
@@ -37,7 +44,26 @@ type QueueItem = {
 	initialMessage?: Message | null;
 	voiceChannelId: string;
 	prefetchedPath?: string | null;
+	flowId?: string;
 };
+
+function buildFlowId(guildId: string): string {
+	return `${guildId || 'noguild'}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function logFlow(flowId: string, stage: string, details?: Record<string, unknown>) {
+	if (!details || Object.keys(details).length === 0) {
+		logger.info(`[flow:${flowId}] ${stage}`);
+		return;
+	}
+
+	try {
+		logger.info(`[flow:${flowId}] ${stage} | ${JSON.stringify(details)}`);
+	} catch (error) {
+		logger.warn(`[flow:${flowId}] Không thể stringify details cho stage '${stage}':`, error);
+		logger.info(`[flow:${flowId}] ${stage} | [unserializable details]`);
+	}
+}
 
 // Create a new instance of Youtube
 const youtube = new Youtube();
@@ -52,6 +78,38 @@ const streamOpts = {
 	hardwareAcceleratedDecoding: config.hardwareAcceleratedDecoding,
 	minimizeLatency: false,
 	h26xPreset: config.h26xPreset
+};
+
+const twitchSafeProfile = {
+	enabled: config.twitchSafeProfileEnabled,
+	width: config.twitchSafeWidth,
+	height: config.twitchSafeHeight,
+	frameRate: config.twitchSafeFps,
+	bitrateVideo: config.twitchSafeBitrateKbps,
+	bitrateVideoMax: config.twitchSafeMaxBitrateKbps,
+	videoCodec: Utils.normalizeVideoCodec(config.twitchSafeVideoCodec),
+	includeAudio: config.twitchSafeIncludeAudio,
+};
+
+const youtubeSafeProfile = {
+	enabled: config.youtubeSafeProfileEnabled,
+	width: config.youtubeSafeWidth,
+	height: config.youtubeSafeHeight,
+	frameRate: config.youtubeSafeFps,
+	bitrateVideo: config.youtubeSafeBitrateKbps,
+	bitrateVideoMax: config.youtubeSafeMaxBitrateKbps,
+	videoCodec: Utils.normalizeVideoCodec(config.youtubeSafeVideoCodec),
+	includeAudio: config.youtubeSafeIncludeAudio,
+};
+
+const retryProfile = {
+	enabled: config.retryProfileEnabled,
+	width: config.retryWidth,
+	height: config.retryHeight,
+	frameRate: config.retryFps,
+	bitrateVideo: config.retryBitrateKbps,
+	bitrateVideoMax: config.retryMaxBitrateKbps,
+	includeAudio: config.retryIncludeAudio,
 };
 
 // Create the videosFolder dir if it doesn't exist
@@ -81,7 +139,17 @@ let videos = videoFiles.map(file => {
 
 async function enqueueOrPlay(item: QueueItem, status: StreamStatus) {
 	const guildId = item.message.guild?.id || "";
+	const flowId = item.flowId || buildFlowId(guildId);
+	logFlow(flowId, 'enqueue_or_play.enter', {
+		guildId,
+		joined: status.joined,
+		playing: status.playing,
+		source: item.source,
+		title: item.title || null
+	});
+
 	if (!guildId) {
+		logFlow(flowId, 'enqueue_or_play.abort', { reason: 'missing_guild' });
 		await sendError(item.message, 'Không thể xác định máy chủ.');
 		return;
 	}
@@ -90,12 +158,14 @@ async function enqueueOrPlay(item: QueueItem, status: StreamStatus) {
 		const queue = queueMap.get(guildId) ?? [];
 		queue.push(item);
 		queueMap.set(guildId, queue);
+		logFlow(flowId, 'queue.enqueued', { position: queue.length, queueLength: queue.length });
 		await sendSuccess(item.message, `Đã thêm vào hàng đợi (#${queue.length}).`);
 		await prefetchNextInQueue(guildId);
 		return;
 	}
 
-	await playVideo(item.message, item.source, item.title, item.initialMessage ?? undefined, item.voiceChannelId);
+	logFlow(flowId, 'enqueue_or_play.direct_play');
+	await playVideo(item.message, item.source, item.title, item.initialMessage ?? undefined, item.voiceChannelId, undefined, flowId);
 }
 
 async function startNextInQueue(guildId: string) {
@@ -104,18 +174,23 @@ async function startNextInQueue(guildId: string) {
 	const next = queue.shift()!;
 	queueMap.set(guildId, queue);
 	const status = getStreamStatus(guildId);
-	await playVideo(next.message, next.source, next.title, next.initialMessage ?? undefined, next.voiceChannelId, next.prefetchedPath ?? undefined);
+	const flowId = next.flowId || buildFlowId(guildId);
+	logFlow(flowId, 'queue.start_next', { remaining: queue.length, source: next.source, title: next.title || null });
+	await playVideo(next.message, next.source, next.title, next.initialMessage ?? undefined, next.voiceChannelId, next.prefetchedPath ?? undefined, flowId);
 }
 
-async function handleUrlPlay(message: Message, link: string, status: StreamStatus) {
+async function handleUrlPlay(message: Message, link: string, status: StreamStatus, flowId: string) {
+	logFlow(flowId, 'url_play.received', { link });
 	const voiceChannelId = message.member?.voice?.channelId || "";
 	if (!voiceChannelId) {
+		logFlow(flowId, 'url_play.abort', { reason: 'missing_voice_channel' });
 		await sendError(message, 'Bạn cần vào kênh thoại trước khi phát video.');
 		return;
 	}
 
 	if (isYoutubePlaylistUrl(link)) {
-		await handleYoutubePlaylistPlay(message, link, status, voiceChannelId);
+		logFlow(flowId, 'url_play.detected_playlist', { link });
+		await handleYoutubePlaylistPlay(message, link, status, voiceChannelId, flowId);
 		return;
 	}
 
@@ -128,23 +203,28 @@ async function handleUrlPlay(message: Message, link: string, status: StreamStatu
 			if (videoDetails?.title) {
 				title = videoDetails.title;
 			}
+			logFlow(flowId, 'url_play.youtube_resolved', { title: title || null });
 		} catch (error) {
 			logger.error(`Lỗi khi xử lý liên kết YouTube: ${link}`, error);
 		}
 	} else if (link.includes('twitch.tv')) {
 		const twitchId = link.split('/').pop() as string;
-		const twitchUrl = await getTwitchStreamUrl(link);
+		logFlow(flowId, 'url_play.twitch_resolving', { twitchId });
+		const twitchUrl = await getTwitchStreamUrl(link, flowId);
 		if (twitchUrl) {
 			source = twitchUrl;
 			title = `twitch.tv/${twitchId}`;
+			logFlow(flowId, 'url_play.twitch_resolved', { resolved: true });
 		} else {
+			logFlow(flowId, 'url_play.abort', { reason: 'twitch_resolve_failed' });
 			await sendError(message, 'Không thể lấy URL Twitch.');
 			return;
 		}
 	} else {
-		try {
+		if (URL.canParse(link)) {
 			title = new URL(link).hostname;
-		} catch {
+		} else {
+			logger.warn(`Không thể parse hostname từ liên kết: ${link}. Sử dụng fallback title 'URL'.`);
 			title = "URL";
 		}
 	}
@@ -154,7 +234,8 @@ async function handleUrlPlay(message: Message, link: string, status: StreamStatu
 			message,
 			source,
 			title,
-			voiceChannelId
+			voiceChannelId,
+			flowId
 		}, status);
 		return;
 	}
@@ -174,12 +255,14 @@ async function handleUrlPlay(message: Message, link: string, status: StreamStatu
 		source,
 		title,
 		initialMessage: prepMessage,
-		voiceChannelId
+		voiceChannelId,
+		flowId
 	}, status);
 }
 
-async function handleYoutubePlaylistPlay(message: Message, link: string, status: StreamStatus, voiceChannelId: string) {
+async function handleYoutubePlaylistPlay(message: Message, link: string, status: StreamStatus, voiceChannelId: string, flowId: string) {
 	const entries = await youtube.getPlaylistEntries(link);
+	logFlow(flowId, 'playlist.fetch_result', { count: entries.length });
 	if (!entries.length) {
 		await sendError(message, 'Không thể lấy danh sách phát hoặc danh sách trống.');
 		return;
@@ -199,10 +282,12 @@ async function handleYoutubePlaylistPlay(message: Message, link: string, status:
 				message,
 				source: entry.url,
 				title: entry.title,
-				voiceChannelId
+				voiceChannelId,
+				flowId
 			});
 		}
 		queueMap.set(guildId, queue);
+		logFlow(flowId, 'playlist.queued', { added: entries.length, queueLength: queue.length });
 		await sendSuccess(message, `Đã thêm ${entries.length} video vào hàng đợi.`);
 		return;
 	}
@@ -213,13 +298,15 @@ async function handleYoutubePlaylistPlay(message: Message, link: string, status:
 			message,
 			source: entry.url,
 			title: entry.title,
-			voiceChannelId
+			voiceChannelId,
+			flowId
 		});
 	}
 	queueMap.set(guildId, queue);
 
 	await sendSuccess(message, `Đang phát video đầu tiên và thêm ${rest.length} video vào hàng đợi.`);
-	await playVideo(message, first.url, first.title, undefined, voiceChannelId);
+	logFlow(flowId, 'playlist.play_first', { firstTitle: first.title || null, queuedAfterFirst: rest.length });
+	await playVideo(message, first.url, first.title, undefined, voiceChannelId, undefined, flowId);
 }
 
 async function prefetchNextInQueue(guildId: string) {
@@ -266,6 +353,14 @@ streamer.client.on("ready", async () => {
 	}
 });
 
+streamer.client.on("error", (error) => {
+	logger.error("Discord client error:", error);
+});
+
+streamer.client.on("warn", (warning) => {
+	logger.warn("Discord client warning:", warning);
+});
+
 type StreamStatus = {
 	joined: boolean;
 	joinsucc: boolean;
@@ -304,23 +399,119 @@ function resetStreamStatus(guildId: string) {
 }
 
 function isUrl(input: string): boolean {
-	try {
-		const parsed = new URL(input);
-		return parsed.protocol === "http:" || parsed.protocol === "https:";
-	} catch {
+	if (!URL.canParse(input)) {
 		return false;
 	}
+	const parsed = new URL(input);
+	return parsed.protocol === "http:" || parsed.protocol === "https:";
 }
 
 function isYoutubePlaylistUrl(input: string): boolean {
-	try {
-		const parsed = new URL(input);
-		const host = parsed.hostname.toLowerCase();
-		if (!host.includes("youtube.com") && !host.includes("youtu.be")) return false;
-		return parsed.searchParams.has("list");
-	} catch {
+	if (!URL.canParse(input)) {
 		return false;
 	}
+	const parsed = new URL(input);
+	const host = parsed.hostname.toLowerCase();
+	if (!host.includes("youtube.com") && !host.includes("youtu.be")) return false;
+	return parsed.searchParams.has("list");
+}
+
+function isSelfConnectedToChannel(guildId: string, channelId: string): boolean {
+	const selfId = streamer.client.user?.id;
+	if (!selfId) return false;
+
+	const guild = streamer.client.guilds.cache.get(guildId);
+	const currentChannelId = guild?.voiceStates?.cache?.get(selfId)?.channelId;
+	return currentChannelId === channelId;
+}
+
+function hasVoiceConnectionReady(): boolean {
+	return Boolean((streamer as any).voiceConnection);
+}
+
+function getConnectionSnapshot() {
+	const voiceConnection = (streamer as any).voiceConnection;
+	const streamConnection = voiceConnection?.streamConnection;
+	return {
+		hasVoiceConnection: Boolean(voiceConnection),
+		hasVoiceUdp: Boolean(voiceConnection?.udp),
+		hasStreamConnection: Boolean(streamConnection),
+		hasStreamUdp: Boolean(streamConnection?.udp),
+		selfStreamExists: Boolean((streamer as any).client?.user)
+	};
+}
+
+async function joinVoiceWithTimeout(guildId: string, channelId: string, flowId: string, timeoutMs = 15000): Promise<void> {
+	let joinError: unknown = null;
+	void streamer.joinVoice(guildId, channelId).catch((error) => {
+		joinError = error;
+	});
+
+	const startedAt = Date.now();
+	while (Date.now() - startedAt < timeoutMs) {
+		if (joinError) {
+			logFlow(flowId, 'play_video.voice_join.error', {
+				error: joinError instanceof Error ? joinError.message : String(joinError)
+			});
+			throw joinError;
+		}
+
+		const connected = isSelfConnectedToChannel(guildId, channelId);
+		const connectionReady = hasVoiceConnectionReady();
+		if (connected && connectionReady) {
+			logFlow(flowId, 'play_video.voice_join.ready', {
+				waitedMs: Date.now() - startedAt
+			});
+			return;
+		}
+
+		await new Promise((resolve) => setTimeout(resolve, 250));
+	}
+
+	const connected = isSelfConnectedToChannel(guildId, channelId);
+	if (connected) {
+		logger.warn(`joinVoice chưa trả về sau ${timeoutMs}ms nhưng bot đã vào channel ${channelId}. Tiếp tục phát stream.`);
+		logFlow(flowId, 'play_video.voice_join.timeout_but_connected', { timeoutMs, connectionReady: hasVoiceConnectionReady() });
+		return;
+	}
+
+	if (joinError) {
+		logFlow(flowId, 'play_video.voice_join.error', {
+			error: joinError instanceof Error ? joinError.message : String(joinError)
+		});
+		throw joinError;
+	}
+
+	logFlow(flowId, 'play_video.voice_join.timeout', { timeoutMs, channelId });
+	throw new Error(`joinVoice timeout sau ${timeoutMs}ms và bot chưa vào voice channel.`);
+}
+
+async function waitForVoiceHandshakeReady(guildId: string, flowId: string, timeoutMs = 5000): Promise<void> {
+	const startedAt = Date.now();
+	while (Date.now() - startedAt < timeoutMs) {
+		const status = getStreamStatus(guildId);
+		const connected = isSelfConnectedToChannel(guildId, status.channelInfo.channelId);
+		const connectionReady = hasVoiceConnectionReady();
+
+		if (status.joinsucc || (connected && connectionReady)) {
+			logFlow(flowId, 'play_video.voice_handshake.ready', {
+				waitedMs: Date.now() - startedAt,
+				joinsucc: status.joinsucc,
+				connected,
+				connectionReady
+			});
+			return;
+		}
+
+		await new Promise((resolve) => setTimeout(resolve, 200));
+	}
+
+	const status = getStreamStatus(guildId);
+	logFlow(flowId, 'play_video.voice_handshake.timeout', {
+		timeoutMs,
+		joinsucc: status.joinsucc,
+		connectionReady: hasVoiceConnectionReady()
+	});
 }
 
 // Voice state update event
@@ -361,6 +552,17 @@ streamer.client.on('messageCreate', async (message) => {
 	const user_cmd = args.shift()!.toLowerCase();
 	const guildId = message.guild?.id || "";
 	const status = guildId ? getStreamStatus(guildId) : null;
+	const flowId = buildFlowId(guildId);
+
+	logFlow(flowId, 'command.received', {
+		command: user_cmd,
+		args,
+		messageId: message.id,
+		guildId,
+		channelId: message.channel.id,
+		userId: message.author.id,
+		voiceChannelId: message.member?.voice?.channelId || null
+	});
 
 	switch (user_cmd) {
 			case 'play':
@@ -376,7 +578,8 @@ streamer.client.on('messageCreate', async (message) => {
 					}
 
 					if (isUrl(input)) {
-						await handleUrlPlay(message, input, status);
+						logFlow(flowId, 'command.play.url_input', { input });
+						await handleUrlPlay(message, input, status, flowId);
 						return;
 					}
 
@@ -421,12 +624,14 @@ streamer.client.on('messageCreate', async (message) => {
 
 					// Log playing video
 					logger.info(`Phát video cục bộ: ${video.path}`);
+					logFlow(flowId, 'command.play.local_resolved', { videoPath: video.path, videoName: videoname });
 
 					await enqueueOrPlay({
 						message,
 						source: video.path,
 						title: videoname,
-						voiceChannelId
+						voiceChannelId,
+						flowId
 					}, status);
 				}
 				break;
@@ -444,7 +649,8 @@ streamer.client.on('messageCreate', async (message) => {
 						return;
 					}
 
-					await handleUrlPlay(message, link, status);
+					logFlow(flowId, 'command.playlink.input', { link });
+					await handleUrlPlay(message, link, status, flowId);
 				}
 				break;
 			case 'ytplay':
@@ -461,12 +667,18 @@ streamer.client.on('messageCreate', async (message) => {
 					}
 
 					try {
+						logFlow(flowId, 'command.ytplay.search_start', { query: title });
 						const searchResults = await yts.search(title, { limit: 1 });
 						const videoResult = searchResults[0];
 
 						const searchResult = await youtube.searchAndGetPageUrl(title);
 
 						if (searchResult.pageUrl && searchResult.title) {
+							logFlow(flowId, 'command.ytplay.search_resolved', {
+								resultTitle: searchResult.title,
+								resultUrl: searchResult.pageUrl,
+								playDlResultTitle: videoResult?.title || null
+							});
 							const voiceChannelId = message.member?.voice?.channelId || "";
 							if (!voiceChannelId) {
 								await sendError(message, 'Bạn cần vào kênh thoại trước khi phát video.');
@@ -476,7 +688,8 @@ streamer.client.on('messageCreate', async (message) => {
 								message,
 								source: searchResult.pageUrl,
 								title: searchResult.title,
-								voiceChannelId
+								voiceChannelId,
+								flowId
 							}, status);
 						} else {
 							logger.warn(`Không tìm thấy video hoặc tiêu đề bị thiếu cho tìm kiếm: "${title}" sử dụng youtube.searchAndGetPageUrl.`);
@@ -722,18 +935,30 @@ streamer.client.on('messageCreate', async (message) => {
 });
 
 // Function to play video
-async function playVideo(message: Message, videoSource: string, title?: string, initialMessage?: Message, targetVoiceChannelId?: string, prefetchedPath?: string) {
+async function playVideo(message: Message, videoSource: string, title?: string, initialMessage?: Message, targetVoiceChannelId?: string, prefetchedPath?: string, flowId?: string, retryCount = 0) {
 	const guildId = message.guild?.id || "";
 	const channelId = targetVoiceChannelId || message.member?.voice?.channelId || "";
 	const cmdChannelId = message.channel.id;
+	const resolvedFlowId = flowId || buildFlowId(guildId);
+
+	logFlow(resolvedFlowId, 'play_video.enter', {
+		title: title || null,
+		source: videoSource,
+		guildId,
+		channelId: channelId || null,
+		prefetched: !!prefetchedPath,
+		retryCount
+	});
 
 	if (!guildId) {
+		logFlow(resolvedFlowId, 'play_video.abort', { reason: 'missing_guild' });
 		await sendError(message, "Không thể xác định máy chủ để phát video.");
 		return;
 	}
 	const status = getStreamStatus(guildId);
 
 	if (!channelId) {
+		logFlow(resolvedFlowId, 'play_video.abort', { reason: 'missing_voice_channel' });
 		await sendError(message, "Bạn cần vào kênh thoại trước khi phát video.");
 		return;
 	}
@@ -745,19 +970,36 @@ async function playVideo(message: Message, videoSource: string, title?: string, 
 	let downloadInProgressMessage: Message | null = null;
 	let isLiveYouTubeStream = false;
 	let controller: AbortController | undefined;
+	let streamDebugInterval: NodeJS.Timeout | null = null;
+	let removeStreamDebugListeners: (() => void) | null = null;
+	let stallDetected = false;
+	let chunkCount = 0;
+	let totalBytes = 0;
+	let firstChunkAt = 0;
+	let lastChunkAt = 0;
+	let streamStartedAt = 0;
+	let streamFailedWithOutputClosed = false;
+	const isTwitchPlayback = (
+		typeof videoSource === 'string' && (videoSource.includes('twitch.tv') || videoSource.includes('ttvnw.net'))
+	) || (title?.startsWith('twitch.tv/') ?? false);
+	const isYoutubePlayback = typeof videoSource === 'string' && (videoSource.includes('youtube.com/') || videoSource.includes('youtu.be/'));
 
 	try {
 		if (typeof videoSource === 'string' && (videoSource.includes('youtube.com/') || videoSource.includes('youtu.be/'))) {
+			logFlow(resolvedFlowId, 'play_video.youtube.inspect');
 			const videoDetails = await youtube.getVideoInfo(videoSource);
 
 			if (videoDetails?.videoDetails?.isLiveContent) {
 				isLiveYouTubeStream = true;
+				logFlow(resolvedFlowId, 'play_video.youtube.live_detected');
 				logger.info(`YouTube video is live: ${title || videoSource}.`);
 				const liveStreamUrl = await youtube.getLiveStreamUrl(videoSource);
 				if (liveStreamUrl) {
 					inputForFfmpeg = liveStreamUrl;
+					logFlow(resolvedFlowId, 'play_video.youtube.live_url_resolved');
 					logger.info(`Sử dụng URL luồng trực tiếp cho ffmpeg: ${liveStreamUrl}`);
 				} else {
+					logFlow(resolvedFlowId, 'play_video.abort', { reason: 'live_url_unavailable' });
 					logger.error(`Không thể lấy URL luồng trực tiếp cho ${title || videoSource}.`);
 					await sendError(message, `Không thể lấy URL luồng trực tiếp cho \`${title || 'YouTube live video'}\`.`);
 					await cleanupStreamStatus(guildId);
@@ -767,8 +1009,10 @@ async function playVideo(message: Message, videoSource: string, title?: string, 
 				if (prefetchedPath) {
 					inputForFfmpeg = prefetchedPath;
 					tempFilePath = prefetchedPath;
+					logFlow(resolvedFlowId, 'play_video.youtube.use_prefetched', { path: prefetchedPath });
 					logger.info(`Sử dụng video đã tải trước: ${prefetchedPath}`);
 				} else {
+				logFlow(resolvedFlowId, 'play_video.youtube.download_start');
 				const downloadingMessage = [
 					`-# 📥 Đang tải về...`,
 					`> **${title || videoSource}**`
@@ -796,11 +1040,16 @@ async function playVideo(message: Message, videoSource: string, title?: string, 
 					try {
 						tempFilePath = await downloadToTempFile(videoSource, ytDlpDownloadOptions);
 						inputForFfmpeg = tempFilePath;
+						logFlow(resolvedFlowId, 'play_video.youtube.download_done', { tempFilePath });
 						logger.info(`Đang phát ${title || videoSource}...`);
 						if (downloadInProgressMessage) {
 							await downloadInProgressMessage.delete().catch(e => logger.warn("Xóa thông báo 'Đang tải...' thất bại:", e));
 						}
 					} catch (downloadError) {
+						logFlow(resolvedFlowId, 'play_video.abort', {
+							reason: 'youtube_download_failed',
+							error: downloadError instanceof Error ? downloadError.message : String(downloadError)
+						});
 						logger.error('Tải xuống video YouTube thất bại:', downloadError);
 						if (downloadInProgressMessage) {
 							await downloadInProgressMessage.edit(`❌ Tải xuống thất bại \`${title || 'Video YouTube'}\`.`).catch(e => logger.warn("Sửa thông báo 'Đang tải...' thất bại:", e));
@@ -814,10 +1063,13 @@ async function playVideo(message: Message, videoSource: string, title?: string, 
 			}
 		}
 
-		await streamer.joinVoice(guildId, channelId);
+		logFlow(resolvedFlowId, 'play_video.voice_join.start', { guildId, channelId });
+		status.channelInfo = { guildId, channelId, cmdChannelId };
+		status.joinsucc = false;
+		await joinVoiceWithTimeout(guildId, channelId, resolvedFlowId);
+		await waitForVoiceHandshakeReady(guildId, resolvedFlowId);
 		status.joined = true;
 		status.playing = true;
-		status.channelInfo = { guildId, channelId, cmdChannelId };
 		await prefetchNextInQueue(guildId);
 
 		if (title) {
@@ -831,60 +1083,347 @@ async function playVideo(message: Message, videoSource: string, title?: string, 
 		}
 
 		await sendPlaying(message, title || videoSource);
+		logFlow(resolvedFlowId, 'play_video.now_playing_sent', { title: title || videoSource });
 
 		const existingController = controllerMap.get(guildId);
 		existingController?.abort();
-		const controller = new AbortController();
+		controller = new AbortController();
 		controllerMap.set(guildId, controller);
 
-		if (!controller) {
-			throw new Error('Bộ điều khiển chưa được khởi tạo');
+		const useTwitchSafeProfile = isTwitchPlayback && twitchSafeProfile.enabled;
+		const useYoutubeSafeProfile = isYoutubePlayback && youtubeSafeProfile.enabled;
+
+		let targetFrameRate = streamOpts.frameRate;
+		let targetHeight = streamOpts.height;
+		let targetWidth = streamOpts.width;
+		let targetBitrateVideo = streamOpts.bitrateVideo;
+		let targetBitrateVideoMax = streamOpts.bitrateVideoMax;
+		let targetVideoCodec = streamOpts.videoCodec;
+		let targetIncludeAudio = !isTwitchPlayback;
+
+		if (useTwitchSafeProfile) {
+			targetFrameRate = twitchSafeProfile.frameRate;
+			targetHeight = twitchSafeProfile.height;
+			targetWidth = twitchSafeProfile.width;
+			targetBitrateVideo = twitchSafeProfile.bitrateVideo;
+			targetBitrateVideoMax = twitchSafeProfile.bitrateVideoMax;
+			targetVideoCodec = twitchSafeProfile.videoCodec;
+			targetIncludeAudio = twitchSafeProfile.includeAudio;
+		} else if (useYoutubeSafeProfile) {
+			targetFrameRate = youtubeSafeProfile.frameRate;
+			targetHeight = youtubeSafeProfile.height;
+			targetWidth = youtubeSafeProfile.width;
+			targetBitrateVideo = youtubeSafeProfile.bitrateVideo;
+			targetBitrateVideoMax = youtubeSafeProfile.bitrateVideoMax;
+			targetVideoCodec = youtubeSafeProfile.videoCodec;
+			targetIncludeAudio = youtubeSafeProfile.includeAudio;
 		}
-		const { command, output: ffmpegOutput } = prepareStream(inputForFfmpeg, streamOpts, controller.signal);
+
+		if (retryCount > 0 && retryProfile.enabled) {
+			targetFrameRate = Math.min(targetFrameRate, retryProfile.frameRate);
+			targetHeight = Math.min(targetHeight, retryProfile.height);
+			targetWidth = Math.min(targetWidth, retryProfile.width);
+			targetBitrateVideo = Math.min(targetBitrateVideo, retryProfile.bitrateVideo);
+			targetBitrateVideoMax = Math.min(targetBitrateVideoMax, retryProfile.bitrateVideoMax);
+			targetIncludeAudio = targetIncludeAudio && retryProfile.includeAudio;
+		}
+
+		const encoderOptions = {
+			...streamOpts,
+			frameRate: targetFrameRate,
+			height: targetHeight,
+			width: targetWidth,
+			bitrateVideo: targetBitrateVideo,
+			bitrateVideoMax: targetBitrateVideoMax,
+			videoCodec: targetVideoCodec,
+			includeAudio: targetIncludeAudio,
+			customFfmpegFlags: isTwitchPlayback
+				? [
+					'-fflags', 'nobuffer',
+					'-flags', 'low_delay',
+					'-reconnect', '1',
+					'-reconnect_streamed', '1',
+					'-reconnect_on_network_error', '1',
+					'-reconnect_on_http_error', '4xx,5xx',
+					'-reconnect_delay_max', '2',
+					'-rw_timeout', '15000000'
+				]
+				: []
+		};
+
+		if (isTwitchPlayback) {
+			logFlow(resolvedFlowId, 'play_video.ffmpeg.twitch_profile', {
+				useSafeProfile: useTwitchSafeProfile,
+				frameRate: encoderOptions.frameRate,
+				width: encoderOptions.width,
+				height: encoderOptions.height,
+				bitrateVideo: encoderOptions.bitrateVideo,
+				bitrateVideoMax: encoderOptions.bitrateVideoMax,
+				videoCodec: encoderOptions.videoCodec,
+				includeAudio: encoderOptions.includeAudio
+			});
+			logFlow(resolvedFlowId, 'play_video.ffmpeg.twitch_no_audio', {
+				reason: 'avoid_av_sync_stall_on_live_twitch'
+			});
+		}
+
+		if (isYoutubePlayback) {
+			logFlow(resolvedFlowId, 'play_video.ffmpeg.youtube_profile', {
+				useSafeProfile: useYoutubeSafeProfile,
+				frameRate: encoderOptions.frameRate,
+				width: encoderOptions.width,
+				height: encoderOptions.height,
+				bitrateVideo: encoderOptions.bitrateVideo,
+				bitrateVideoMax: encoderOptions.bitrateVideoMax,
+				videoCodec: encoderOptions.videoCodec,
+				includeAudio: encoderOptions.includeAudio
+			});
+		}
+
+		if (retryCount > 0) {
+			logFlow(resolvedFlowId, 'play_video.retry.degraded_profile', {
+				retryCount,
+				frameRate: encoderOptions.frameRate,
+				width: encoderOptions.width,
+				height: encoderOptions.height,
+				bitrateVideo: encoderOptions.bitrateVideo,
+				bitrateVideoMax: encoderOptions.bitrateVideoMax,
+				includeAudio: encoderOptions.includeAudio
+			});
+		}
+
+		logFlow(resolvedFlowId, 'play_video.ffmpeg.prepare');
+		const { command, output: ffmpegOutput } = prepareStream(inputForFfmpeg, encoderOptions, controller.signal);
+
+		command.on('start', (commandLine: string) => {
+			logFlow(resolvedFlowId, 'play_video.ffmpeg.start', {
+				connection: getConnectionSnapshot()
+			});
+			logger.info(`FFmpeg command: ${commandLine}`);
+		});
+
+		command.on('progress', (progress: any) => {
+			logFlow(resolvedFlowId, 'play_video.ffmpeg.progress', {
+				frames: progress?.frames ?? null,
+				currentKbps: progress?.currentKbps ?? null,
+				timemark: progress?.timemark ?? null,
+				targetSize: progress?.targetSize ?? null
+			});
+		});
+
+		command.on('stderr', (line: string) => {
+			const msg = line?.trim();
+			if (!msg) return;
+			if (msg.toLowerCase().includes('error') || msg.toLowerCase().includes('failed')) {
+				logger.warn(`ffmpeg stderr: ${msg}`);
+			}
+		});
+
+		command.on('end', () => {
+			logFlow(resolvedFlowId, 'play_video.ffmpeg.end', {
+				connection: getConnectionSnapshot()
+			});
+		});
+
+		chunkCount = 0;
+		totalBytes = 0;
+		firstChunkAt = 0;
+		lastChunkAt = 0;
+		streamStartedAt = Date.now();
+		streamFailedWithOutputClosed = false;
+
+		const onOutputData = (chunk: Buffer) => {
+			chunkCount += 1;
+			totalBytes += chunk.length;
+			if (!firstChunkAt) {
+				firstChunkAt = Date.now();
+				logFlow(resolvedFlowId, 'play_video.output.first_chunk', {
+					afterMs: firstChunkAt - streamStartedAt,
+					chunkBytes: chunk.length
+				});
+			}
+			lastChunkAt = Date.now();
+
+			if (chunkCount % 120 === 0) {
+				logFlow(resolvedFlowId, 'play_video.output.chunk_progress', {
+					chunks: chunkCount,
+					totalBytes,
+					uptimeMs: Date.now() - streamStartedAt
+				});
+			}
+		};
+
+		const onOutputEnd = () => {
+			logFlow(resolvedFlowId, 'play_video.output.end', {
+				chunks: chunkCount,
+				totalBytes,
+				uptimeMs: Date.now() - streamStartedAt
+			});
+		};
+
+		const onOutputClose = () => {
+			logFlow(resolvedFlowId, 'play_video.output.close', {
+				chunks: chunkCount,
+				totalBytes,
+				uptimeMs: Date.now() - streamStartedAt
+			});
+		};
+
+		const onOutputError = (error: unknown) => {
+			logFlow(resolvedFlowId, 'play_video.output.error', {
+				error: error instanceof Error ? error.message : String(error)
+			});
+		};
+
+		ffmpegOutput.on('data', onOutputData);
+		ffmpegOutput.on('end', onOutputEnd);
+		ffmpegOutput.on('close', onOutputClose);
+		ffmpegOutput.on('error', onOutputError);
+
+		removeStreamDebugListeners = () => {
+			ffmpegOutput.off('data', onOutputData);
+			ffmpegOutput.off('end', onOutputEnd);
+			ffmpegOutput.off('close', onOutputClose);
+			ffmpegOutput.off('error', onOutputError);
+		};
+
+		streamDebugInterval = setInterval(() => {
+			const elapsedMs = Date.now() - streamStartedAt;
+			const kbps = elapsedMs > 0 ? Math.round((totalBytes * 8) / elapsedMs) : 0;
+			const sinceLastChunkMs = lastChunkAt > 0 ? Date.now() - lastChunkAt : null;
+			const connection = getConnectionSnapshot();
+			logFlow(resolvedFlowId, 'play_video.output.heartbeat', {
+				elapsedMs,
+				chunks: chunkCount,
+				totalBytes,
+				approxKbps: kbps,
+				firstChunkSeen: firstChunkAt > 0,
+				sinceLastChunkMs,
+				connection
+			});
+
+			if (sinceLastChunkMs !== null && sinceLastChunkMs > 5000 && chunkCount > 0) {
+				logger.warn(`Phát hiện stall output: không có chunk mới trong ${sinceLastChunkMs}ms (chunks=${chunkCount}, bytes=${totalBytes}).`);
+				logFlow(resolvedFlowId, 'play_video.output.stall_detected', {
+					sinceLastChunkMs,
+					chunks: chunkCount,
+					totalBytes,
+					connection
+				});
+
+				if (sinceLastChunkMs > 10000 && controller && !controller.signal.aborted && !stallDetected) {
+					stallDetected = true;
+					logFlow(resolvedFlowId, 'play_video.output.stall_abort', {
+						reason: 'output_stall_over_10s',
+						isTwitchPlayback,
+						retryCount
+					});
+					controller.abort();
+				}
+			}
+		}, 3000);
 
 		command.on("error", (err, stdout, stderr) => {
 			// Don't log error if it's due to manual stop
 			if (!status.manualStop && controller && !controller.signal.aborted) {
-				logger.error('Lỗi xảy ra với ffmpeg:', err.message);
+				if (typeof err?.message === 'string' && err.message.toLowerCase().includes('output stream closed')) {
+					streamFailedWithOutputClosed = true;
+				}
+				logFlow(resolvedFlowId, 'play_video.ffmpeg.error', { message: err.message });
+				logger.error(`Lỗi xảy ra với ffmpeg: ${err.message}`);
 				if (stdout) {
-					logger.error('ffmpeg stdout:', stdout);
+					logger.error(`ffmpeg stdout: ${stdout}`);
 				}
 				if (stderr) {
-					logger.error('ffmpeg stderr:', stderr);
+					logger.error(`ffmpeg stderr: ${stderr}`);
 				}
 				controller.abort();
 			}
 		});
 
+		logFlow(resolvedFlowId, 'play_video.stream.start');
 		await playStream(ffmpegOutput, streamer, undefined, controller.signal)
 			.catch((err) => {
 				if (controller && !controller.signal.aborted) {
+					logFlow(resolvedFlowId, 'play_video.stream.error', { error: err instanceof Error ? err.message : String(err) });
 					logger.error('Lỗi playStream:', err);
 				}
 				if (controller && !controller.signal.aborted) controller.abort();
 			});
 
 		if (controller && !controller.signal.aborted) {
+			logFlow(resolvedFlowId, 'play_video.stream.finished');
 			logger.info(`Đã phát xong: ${title || videoSource}`);
 		}
 
 	} catch (error) {
+		logFlow(resolvedFlowId, 'play_video.exception', { error: error instanceof Error ? error.message : String(error) });
 		logger.error(`Lỗi trong playVideo cho ${title || videoSource}:`, error);
 		if (controller && !controller.signal.aborted) controller.abort();
 	} finally {
-		const shouldStartNext = !status.manualStop;
+		if (streamDebugInterval) {
+			clearInterval(streamDebugInterval);
+			streamDebugInterval = null;
+		}
+
+		if (removeStreamDebugListeners) {
+			removeStreamDebugListeners();
+			removeStreamDebugListeners = null;
+		}
+
+		logFlow(resolvedFlowId, 'play_video.finally', { manualStop: status.manualStop });
+		let shouldRetryCurrent = false;
+		let retrySource = videoSource;
+		const streamDurationMs = Date.now() - streamStartedAt;
+		const isFastFailOutputClose = isTwitchPlayback
+			&& streamFailedWithOutputClosed
+			&& streamDurationMs <= 10000
+			&& chunkCount > 0;
+
+		if ((stallDetected || isFastFailOutputClose) && retryCount < 1) {
+			shouldRetryCurrent = true;
+			logFlow(resolvedFlowId, 'play_video.retry.reason', {
+				retryCount: retryCount + 1,
+				stallDetected,
+				streamFailedWithOutputClosed,
+				streamDurationMs,
+				chunks: chunkCount,
+				totalBytes
+			});
+			const twitchTitle = title?.startsWith('twitch.tv/') ? title.slice('twitch.tv/'.length) : '';
+			const twitchChannel = twitchTitle.split('?')[0].trim();
+			if (isTwitchPlayback && twitchChannel) {
+				const refreshed = await getTwitchStreamUrl(`https://www.twitch.tv/${twitchChannel}`, resolvedFlowId);
+				if (refreshed) {
+					retrySource = refreshed;
+					logFlow(resolvedFlowId, 'play_video.retry.twitch_refreshed_url', { twitchChannel, retryCount: retryCount + 1 });
+				} else {
+					logFlow(resolvedFlowId, 'play_video.retry.twitch_refresh_failed', { twitchChannel, retryCount: retryCount + 1 });
+				}
+			}
+		}
+
+		const shouldStartNext = !status.manualStop && !shouldRetryCurrent;
 		if (!status.manualStop && controller && !controller.signal.aborted) {
 			await sendFinishMessage(guildId);
 		}
 
 		await cleanupStreamStatus(guildId);
 		if (shouldStartNext) {
+			logFlow(resolvedFlowId, 'play_video.queue_next.start');
 			await startNextInQueue(guildId);
+		}
+
+		if (shouldRetryCurrent) {
+			await new Promise((resolve) => setTimeout(resolve, 1200));
+			logFlow(resolvedFlowId, 'play_video.retry.start', { retryCount: retryCount + 1 });
+			await playVideo(message, retrySource, title, undefined, targetVoiceChannelId, undefined, resolvedFlowId, retryCount + 1);
 		}
 
 		if (tempFilePath && !isLiveYouTubeStream) {
 			try {
 				fs.unlinkSync(tempFilePath);
+				logFlow(resolvedFlowId, 'play_video.temp_cleanup.done', { tempFilePath });
 			} catch (cleanupError) {
 				logger.error(`Xóa tệp tạm ${tempFilePath} thất bại:`, cleanupError);
 			}
@@ -920,32 +1459,130 @@ async function cleanupStreamStatus(guildId: string) {
 	}
 }
 
-// Function to get Twitch URL
-async function getTwitchStreamUrl(url: string): Promise<string | null> {
+function parseResolutionArea(resolution?: string): number {
+	if (!resolution) return 0;
+	const match = resolution.match(/(\d+)x(\d+)/i);
+	if (!match) return 0;
+	const width = Number(match[1]);
+	const height = Number(match[2]);
+	if (!Number.isFinite(width) || !Number.isFinite(height)) return 0;
+	return width * height;
+}
+
+function selectBestTwitchStream(streams: TwitchStream[]): TwitchStream | null {
+	if (!streams.length) return null;
+
+	const targetArea = Math.max(1, config.width * config.height);
+	let bestAtOrBelow: TwitchStream | null = null;
+	let bestAtOrBelowArea = -1;
+	let bestAbove: TwitchStream | null = null;
+	let bestAboveArea = Number.MAX_SAFE_INTEGER;
+
+	for (const stream of streams) {
+		const area = parseResolutionArea(stream.resolution);
+		if (area <= 0) continue;
+
+		if (area <= targetArea) {
+			if (area > bestAtOrBelowArea) {
+				bestAtOrBelowArea = area;
+				bestAtOrBelow = stream;
+			}
+		} else if (area < bestAboveArea) {
+			bestAboveArea = area;
+			bestAbove = stream;
+		}
+	}
+
+	return bestAtOrBelow || bestAbove || streams[0];
+}
+
+async function getTwitchStreamUrlViaYtDlp(url: string, flowId?: string): Promise<string | null> {
 	try {
+		if (flowId) logFlow(flowId, 'twitch.ytdlp_fallback.start', { url });
+		const result = await ytdl(url, {
+			getUrl: true,
+			noWarnings: true,
+			noPlaylist: true,
+			format: `bestvideo[height<=${config.height}]+bestaudio/best[height<=${config.height}]/best`
+		});
+
+		const text = typeof result === 'string' ? result : String(result ?? '');
+		const firstUrl = text
+			.split(/\r?\n/)
+			.map(line => line.trim())
+			.find(line => line.startsWith('http://') || line.startsWith('https://'));
+
+		if (firstUrl) {
+			if (flowId) logFlow(flowId, 'twitch.ytdlp_fallback.success');
+			return firstUrl;
+		}
+		logger.error('yt-dlp không trả về URL stream hợp lệ cho Twitch.');
+		return null;
+	} catch (error) {
+		if (flowId) logFlow(flowId, 'twitch.ytdlp_fallback.error', { error: error instanceof Error ? error.message : String(error) });
+		logger.error('Fallback yt-dlp cho Twitch thất bại:', error);
+		return null;
+	}
+}
+
+// Function to get Twitch URL
+async function getTwitchStreamUrl(url: string, flowId?: string): Promise<string | null> {
+	try {
+		if (flowId) logFlow(flowId, 'twitch.resolve.start', { url });
+		const parsed = new URL(url);
+		const segments = parsed.pathname.split('/').filter(Boolean);
+
 		// Handle VODs
-		if (url.includes('/videos/')) {
-			const vodId = url.split('/videos/').pop() as string;
-			const vodInfo = await getVod(vodId);
-			const vod = vodInfo.find((stream: TwitchStream) => stream.resolution === `${config.width}x${config.height}`) || vodInfo[0];
-			if (vod?.url) {
-				return vod.url;
+		if (segments.includes('videos')) {
+			const videosIndex = segments.indexOf('videos');
+			const vodId = segments[videosIndex + 1];
+			if (!vodId) {
+				logger.error('URL Twitch VOD không hợp lệ, thiếu ID video.');
+				if (flowId) logFlow(flowId, 'twitch.resolve.vod.invalid');
+				return await getTwitchStreamUrlViaYtDlp(url, flowId);
 			}
-			logger.error('Không tìm thấy URL VOD');
-			return null;
+
+			try {
+				const vodInfo = await getVod(vodId);
+				const vod = selectBestTwitchStream(vodInfo);
+				if (vod?.url) {
+					if (flowId) logFlow(flowId, 'twitch.resolve.vod.success', { resolution: vod.resolution });
+					return vod.url;
+				}
+				logger.error('Không tìm thấy URL VOD từ twitch-m3u8');
+			} catch (error) {
+				if (flowId) logFlow(flowId, 'twitch.resolve.vod.error', { error: error instanceof Error ? error.message : String(error) });
+				logger.warn('twitch-m3u8 lỗi khi lấy VOD, chuyển sang yt-dlp:', error);
+			}
+
+			return await getTwitchStreamUrlViaYtDlp(url, flowId);
 		} else {
-			const twitchId = url.split('/').pop() as string;
-			const streams = await getStream(twitchId);
-			const stream = streams.find((stream: TwitchStream) => stream.resolution === `${config.width}x${config.height}`) || streams[0];
-			if (stream?.url) {
-				return stream.url;
+			const twitchId = segments[0];
+			if (!twitchId) {
+				logger.error('URL Twitch live không hợp lệ, thiếu channel.');
+				if (flowId) logFlow(flowId, 'twitch.resolve.live.invalid');
+				return await getTwitchStreamUrlViaYtDlp(url, flowId);
 			}
-			logger.error('Không tìm thấy URL luồng');
-			return null;
+
+			try {
+				const streams = await getStream(twitchId);
+				const stream = selectBestTwitchStream(streams);
+				if (stream?.url) {
+					if (flowId) logFlow(flowId, 'twitch.resolve.live.success', { resolution: stream.resolution });
+					return stream.url;
+				}
+				logger.error('Không tìm thấy URL luồng từ twitch-m3u8');
+			} catch (error) {
+				if (flowId) logFlow(flowId, 'twitch.resolve.live.error', { error: error instanceof Error ? error.message : String(error) });
+				logger.warn('twitch-m3u8 lỗi khi lấy stream live, chuyển sang yt-dlp:', error);
+			}
+
+			return await getTwitchStreamUrlViaYtDlp(url, flowId);
 		}
 	} catch (error) {
+		if (flowId) logFlow(flowId, 'twitch.resolve.exception', { error: error instanceof Error ? error.message : String(error) });
 		logger.error('Lấy URL Twitch thất bại:', error);
-		return null;
+		return await getTwitchStreamUrlViaYtDlp(url, flowId);
 	}
 }
 
@@ -966,18 +1603,21 @@ const status_watch = (name: string) => {
 		.setState(`Đang phát ${name.substring(0, 112)}...`)
 }
 
-async function updateVoiceStatus(channelId: string, status: string) {
+async function updateVoiceStatus(channelId: string, status: string): Promise<boolean> {
 	try {
-		if (!channelId) return;
+		if (!channelId) {
+			logger.warn('Bỏ qua cập nhật trạng thái kênh thoại: thiếu channelId');
+			return false;
+		}
 		const token = config.token;
 		if (!token) {
 			logger.warn('Token Discord chưa được cấu hình, không thể cập nhật trạng thái kênh thoại');
-			return;
+			return false;
 		}
 
 		const payload = JSON.stringify({ status });
 
-		await new Promise<void>((resolve) => {
+		return await new Promise<boolean>((resolve) => {
 			const opts = {
 				method: 'PUT',
 				headers: {
@@ -993,23 +1633,31 @@ async function updateVoiceStatus(channelId: string, status: string) {
 				res.on('end', () => {
 					if (res.statusCode >= 200 && res.statusCode < 300) {
 						logger.info(`Đã cập nhật trạng thái kênh thoại ${channelId} -> ${status}`);
+						resolve(true);
 					} else {
-						logger.warn(`Không thể cập nhật trạng thái kênh thoại ${channelId}: ${res.statusCode} ${res.statusMessage} - ${body}`);
+						logger.warn(`Không thể cập nhật trạng thái kênh thoại ${channelId}: ${res.statusCode} ${res.statusMessage} - ${body}. Bỏ qua và tiếp tục.`);
+						resolve(false);
 					}
-					resolve();
 				});
 			});
 
+			req.setTimeout(10000, () => {
+				logger.warn(`Yêu cầu cập nhật trạng thái kênh thoại ${channelId} bị timeout. Bỏ qua và tiếp tục.`);
+				req.destroy();
+				resolve(false);
+			});
+
 			req.on('error', (err: any) => {
-				logger.error('Lỗi khi cập nhật trạng thái kênh thoại:', err);
-				resolve();
+				logger.warn('Lỗi khi cập nhật trạng thái kênh thoại, bỏ qua và tiếp tục:', err);
+				resolve(false);
 			});
 
 			req.write(payload);
 			req.end();
 		});
 	} catch (err) {
-		logger.error('Lỗi updateVoiceStatus:', err);
+		logger.warn('Lỗi updateVoiceStatus, bỏ qua và tiếp tục:', err);
+		return false;
 	}
 }
 
@@ -1102,6 +1750,14 @@ process.on('uncaughtException', (error) => {
 		logger.error('Ngoại lệ không được xử lý:', error);
 		return
 	}
+});
+
+process.on('unhandledRejection', (reason) => {
+	logger.error('Promise rejection không được xử lý:', reason);
+});
+
+process.on('warning', (warning) => {
+	logger.warn('Node warning:', warning);
 });
 
 // Run server if enabled in config

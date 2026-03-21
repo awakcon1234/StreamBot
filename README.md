@@ -133,6 +133,35 @@ STREAM_MAX_BITRATE_KBPS = "2500" # The maximum bitrate of the video stream in ki
 STREAM_HARDWARE_ACCELERATION = "false" # Whether to use hardware acceleration for video decoding, set to "true" to enable, "false" to disable
 STREAM_VIDEO_CODEC = "H264" # The video codec to use for the stream, can be "H264" or "H265" or "VP8"
 
+# Twitch safe profile (applies when source is Twitch)
+STREAM_TWITCH_SAFE_PROFILE_ENABLED = "true"
+STREAM_TWITCH_SAFE_WIDTH = "1280"
+STREAM_TWITCH_SAFE_HEIGHT = "720"
+STREAM_TWITCH_SAFE_FPS = "30"
+STREAM_TWITCH_SAFE_BITRATE_KBPS = "2500"
+STREAM_TWITCH_SAFE_MAX_BITRATE_KBPS = "4000"
+STREAM_TWITCH_SAFE_VIDEO_CODEC = "H264"
+STREAM_TWITCH_SAFE_INCLUDE_AUDIO = "false"
+
+# YouTube safe profile (applies when source is YouTube URL)
+STREAM_YOUTUBE_SAFE_PROFILE_ENABLED = "false"
+STREAM_YOUTUBE_SAFE_WIDTH = "1280"
+STREAM_YOUTUBE_SAFE_HEIGHT = "720"
+STREAM_YOUTUBE_SAFE_FPS = "30"
+STREAM_YOUTUBE_SAFE_BITRATE_KBPS = "2000"
+STREAM_YOUTUBE_SAFE_MAX_BITRATE_KBPS = "2500"
+STREAM_YOUTUBE_SAFE_VIDEO_CODEC = "H264"
+STREAM_YOUTUBE_SAFE_INCLUDE_AUDIO = "true"
+
+# Retry profile (applies on retryCount > 0)
+STREAM_RETRY_PROFILE_ENABLED = "true"
+STREAM_RETRY_WIDTH = "1280"
+STREAM_RETRY_HEIGHT = "720"
+STREAM_RETRY_FPS = "30"
+STREAM_RETRY_BITRATE_KBPS = "2500"
+STREAM_RETRY_MAX_BITRATE_KBPS = "4000"
+STREAM_RETRY_INCLUDE_AUDIO = "false"
+
 # STREAM_H26X_PRESET: Determines the encoding preset for H26x video streams. 
 # If the STREAM_H26X_PRESET environment variable is set, it parses the value 
 # using the parsePreset function. If not set, it defaults to 'ultrafast' for 

@@ -97,7 +97,8 @@ function args(url: string, options: Partial<YTFlags>): string[] {
 function json(str: string) {
     try {
         return JSON.parse(str);
-    } catch {
+    } catch (error) {
+        logger.warn("Không thể parse JSON từ yt-dlp output, dùng raw output thay thế:", error);
         return str;
     }
 }
