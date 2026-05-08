@@ -132,6 +132,7 @@ STREAM_BITRATE_KBPS = "2000" # The bitrate of the video stream in kilobits per s
 STREAM_MAX_BITRATE_KBPS = "2500" # The maximum bitrate of the video stream in kilobits per second (Kbps)
 STREAM_HARDWARE_ACCELERATION = "false" # Whether to use hardware acceleration for video decoding, set to "true" to enable, "false" to disable
 STREAM_VIDEO_CODEC = "H264" # The video codec to use for the stream, can be "H264" or "H265" or "VP8"
+STREAM_DEBUG_LOGS = "false" # Enable verbose stream debug logs (ffmpeg progress/chunk heartbeat)
 
 # Twitch safe profile (applies when source is Twitch)
 STREAM_TWITCH_SAFE_PROFILE_ENABLED = "true"

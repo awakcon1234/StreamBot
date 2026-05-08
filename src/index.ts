@@ -51,7 +51,17 @@ function buildFlowId(guildId: string): string {
 	return `${guildId || 'noguild'}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+const noisyFlowStages = new Set([
+	'play_video.ffmpeg.progress',
+	'play_video.output.chunk_progress',
+	'play_video.output.heartbeat',
+]);
+
 function logFlow(flowId: string, stage: string, details?: Record<string, unknown>) {
+	if (!config.streamDebugLogs && noisyFlowStages.has(stage)) {
+		return;
+	}
+
 	if (!details || Object.keys(details).length === 0) {
 		logger.info(`[flow:${flowId}] ${stage}`);
 		return;

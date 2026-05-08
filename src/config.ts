@@ -28,6 +28,7 @@ export default {
     hardwareAcceleratedDecoding: process.env.STREAM_HARDWARE_ACCELERATION ? parseBoolean(process.env.STREAM_HARDWARE_ACCELERATION) : false,
     h26xPreset: process.env.STREAM_H26X_PRESET ? parsePreset(process.env.STREAM_H26X_PRESET) : 'ultrafast',
     videoCodec: process.env.STREAM_VIDEO_CODEC ? parseVideoCodec(process.env.STREAM_VIDEO_CODEC) : 'H264',
+    streamDebugLogs: process.env.STREAM_DEBUG_LOGS ? parseBoolean(process.env.STREAM_DEBUG_LOGS) : false,
 
     // Safe profile options
     twitchSafeProfileEnabled: process.env.STREAM_TWITCH_SAFE_PROFILE_ENABLED ? parseBoolean(process.env.STREAM_TWITCH_SAFE_PROFILE_ENABLED) : true,
