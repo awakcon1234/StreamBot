@@ -1,4 +1,4 @@
-import { Client, TextChannel, CustomStatus, Message, MessageAttachment, ActivityOptions, BaseGuildVoiceChannel } from "discord.js-selfbot-v13";
+import { Client, TextChannel, CustomStatus, Message, MessageAttachment, ActivityOptions } from "discord.js-selfbot-v13";
 import { Streamer, Utils, prepareStream, playStream } from "@dank074/discord-video-stream";
 import config from "./config.js";
 import fs from 'fs';
@@ -10,7 +10,7 @@ import logger from './utils/logger.js';
 import { downloadExecutable, downloadToTempFile, checkForUpdatesAndUpdate } from './utils/yt-dlp.js';
 import ytdl from './utils/yt-dlp.js';
 import { Youtube } from './utils/youtube.js';
-import { TwitchStream } from './@types/index.js';
+import { TwitchStream } from './types/index.js';
 import https from 'https';
 import { WebSocket as WsWebSocket } from 'ws';
 
@@ -29,8 +29,14 @@ if (!(globalThis as any).WebSocket) {
 	}
 })();
 
+// Create a new instance of Client
+const client = new Client();
+
 // Create a new instance of Streamer
-const streamer = new Streamer(new Client());
+const streamer = new Streamer(client);
+
+// Create a new instance of Youtube
+const youtube = new Youtube();
 
 // Declare controllers per guild to abort streams
 const controllerMap = new Map<string, AbortController>();
@@ -74,9 +80,6 @@ function logFlow(flowId: string, stage: string, details?: Record<string, unknown
 		logger.info(`[flow:${flowId}] ${stage} | [unserializable details]`);
 	}
 }
-
-// Create a new instance of Youtube
-const youtube = new Youtube();
 
 const streamOpts = {
 	width: config.width,
@@ -143,8 +146,7 @@ const videoFiles = fs.readdirSync(config.videosDir);
 // Create an array of video objects
 let videos = videoFiles.map(file => {
 	const fileName = path.parse(file).name;
-	// replace space with _
-	return { name: fileName.replace(/ /g, '_'), path: path.join(config.videosDir, file) };
+	return { name: fileName, path: path.join(config.videosDir, file) };
 });
 
 async function enqueueOrPlay(item: QueueItem, status: StreamStatus) {
@@ -1772,9 +1774,9 @@ process.on('warning', (warning) => {
 
 // Run server if enabled in config
 if (config.server_enabled) {
-	// Run server.js
-	import('./server.js');
+	// Run server.ts
+	import('./server/index.js');
 }
 
 // Login to Discord
-streamer.client.login(config.token);
+client.login(config.token);

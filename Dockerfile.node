@@ -9,10 +9,6 @@ RUN apt-get update && apt-get install -y curl ca-certificates unzip && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Install bun and add to PATH
-ENV BUN_INSTALL="/usr/local/"
-RUN curl -fsSL https://bun.sh/install | bash
-
 # Install remaining dependencies and clean cache
 RUN apt-get update && apt-get install -y \
     build-essential \
@@ -25,16 +21,13 @@ RUN apt-get update && apt-get install -y \
 COPY package.json ./
 
 # Install dependencies
-RUN bun install
-
-# Trust all packages
-RUN bun pm trust --all
+RUN npm install
 
 # Copy the rest of the application code
 COPY . .
 
 # Verify the application builds
-RUN bun run build
+RUN npm run build
 
 # Specify the port number the container should expose
 EXPOSE 3000
@@ -43,4 +36,4 @@ EXPOSE 3000
 RUN mkdir -p ./videos
 
 # Command to run the application
-CMD ["bun", "run", "start"]
+CMD ["npm", "run", "start:node"]

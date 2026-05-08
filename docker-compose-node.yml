@@ -1,15 +1,15 @@
 services:
   streambot:
-    image: quay.io/ydrag0n/streambot:latest
+    image: quay.io/ydrag0n/streambot:node
     container_name: streambot
     restart: always
     environment:
       # Selfbot options
       TOKEN: "" # Your Discord self-bot token
       PREFIX: "$" # The prefix used to trigger your self-bot commands
-      COMMAND_CHANNEL_ID: "" # Comma-separated IDs of channels where your self-bot will respond to commands
-      GUILD_ID: "" # Optional static guild ID for refactored command/service flows
-      VIDEO_CHANNEL_ID: "" # Optional static voice/video channel ID for refactored command/service flows
+      GUILD_ID: "" # The ID of the Discord server your self-bot will be running on
+      COMMAND_CHANNEL_ID: "" # The ID of the Discord channel where your self-bot will respond to commands
+      VIDEO_CHANNEL_ID: "" # The ID of the Discord voice/video channel where your self-bot will stream videos
       ADMIN_IDS: '["YOUR_USER_ID_HERE"]' # A list of Discord user IDs that are considered administrators (comma-separated or JSON array format)
       # General options
       VIDEOS_DIR: "./videos" # The local path where you store video files
@@ -30,7 +30,6 @@ services:
       STREAM_MAX_BITRATE_KBPS: "2500" # The maximum bitrate of the video stream in kilobits per second (Kbps)
       STREAM_HARDWARE_ACCELERATION: "false" # Whether to use hardware acceleration for video decoding, set to "true" to enable, "false" to disable
       STREAM_VIDEO_CODEC: "H264" # The video codec to use for the stream, can be "H264" or "H265" or "VP8"
-      STREAM_DEBUG_LOGS: "false" # Enable verbose stream debug logs (ffmpeg progress/chunk heartbeat)
       
       # STREAM_H26X_PRESET: Determines the encoding preset for H26x video streams. 
       # If the STREAM_H26X_PRESET environment variable is set, it parses the value 
@@ -41,35 +40,6 @@ services:
       # "fast", "medium", "slow", "slower", "veryslow".
       STREAM_H26X_PRESET: "ultrafast"
 
-      # Twitch safe profile (applies when source is Twitch)
-      STREAM_TWITCH_SAFE_PROFILE_ENABLED: "true"
-      STREAM_TWITCH_SAFE_WIDTH: "1280"
-      STREAM_TWITCH_SAFE_HEIGHT: "720"
-      STREAM_TWITCH_SAFE_FPS: "30"
-      STREAM_TWITCH_SAFE_BITRATE_KBPS: "2500"
-      STREAM_TWITCH_SAFE_MAX_BITRATE_KBPS: "4000"
-      STREAM_TWITCH_SAFE_VIDEO_CODEC: "H264"
-      STREAM_TWITCH_SAFE_INCLUDE_AUDIO: "false"
-
-      # YouTube safe profile (applies when source is YouTube URL)
-      STREAM_YOUTUBE_SAFE_PROFILE_ENABLED: "false"
-      STREAM_YOUTUBE_SAFE_WIDTH: "1280"
-      STREAM_YOUTUBE_SAFE_HEIGHT: "720"
-      STREAM_YOUTUBE_SAFE_FPS: "30"
-      STREAM_YOUTUBE_SAFE_BITRATE_KBPS: "2000"
-      STREAM_YOUTUBE_SAFE_MAX_BITRATE_KBPS: "2500"
-      STREAM_YOUTUBE_SAFE_VIDEO_CODEC: "H264"
-      STREAM_YOUTUBE_SAFE_INCLUDE_AUDIO: "true"
-
-      # Retry profile (applies on retryCount > 0)
-      STREAM_RETRY_PROFILE_ENABLED: "true"
-      STREAM_RETRY_WIDTH: "1280"
-      STREAM_RETRY_HEIGHT: "720"
-      STREAM_RETRY_FPS: "30"
-      STREAM_RETRY_BITRATE_KBPS: "2500"
-      STREAM_RETRY_MAX_BITRATE_KBPS: "4000"
-      STREAM_RETRY_INCLUDE_AUDIO: "false"
-
       # Videos server options
       SERVER_ENABLED: "false" # Whether to enable the built-in video server
       SERVER_USERNAME: "admin" # The username for the video server's admin interface
@@ -77,25 +47,5 @@ services:
       SERVER_PORT: "3000" # The port number the video server will listen on
     volumes:
       - ./videos:/home/bots/StreamBot/videos
-    network_mode: "service:warp"
-    depends_on:
-      - warp
-  warp:
-    image: caomingjun/warp
-    container_name: warp
-    restart: always
-    devices:
-      - /dev/net/tun:/dev/net/tun
     ports:
-      - '1080:1080'
-      - '3000:3000'
-    environment:
-      - WARP_SLEEP=2
-      - WARP_LICENSE_KEY= # Your Cloudflare Warp license key
-    cap_add:
-      - NET_ADMIN
-    sysctls:
-      - net.ipv6.conf.all.disable_ipv6=0
-      - net.ipv4.conf.all.src_valid_mark=1
-    volumes:
-      - ./data:/var/lib/cloudflare-warp
+      - 3000:3000

@@ -1,6 +1,6 @@
 {
   "name": "streambot",
-  "version": "1.2.0",
+  "version": "2.0.2",
   "description": "A self bot to stream movies/videos to Discord.",
   "main": "dist/index.js",
   "type": "module",
@@ -8,10 +8,12 @@
     "start": "bun src/index.ts",
     "start:node": "node dist/index.js",
     "prod:node": "set \"DOTENV_CONFIG_PATH=.env.prod\" && node -r dotenv/config dist/index.js",
-    "server": "bun src/server.ts",
-    "server:node": "node dist/server.js",
+    "server": "bun src/server/index.ts",
+    "server:node": "node dist/server/index.js",
     "build": "tsc",
-    "watch": "tsc -w"
+    "watch": "tsc -w",
+    "gen-hash": "bun src/utils/gen-hash.ts",
+    "gen-hash:node": "node dist/utils/gen-hash.js"
   },
   "author": "ysdragon",
   "license": "MIT",
@@ -33,7 +35,8 @@
     "multer": "^2.1.1",
     "play-dl": "^1.9.7",
     "twitch-m3u8": "^1.1.5",
-    "winston": "^3.19.0"
+    "winston": "^3.19.0",
+    "ws": "^8.18.3"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",

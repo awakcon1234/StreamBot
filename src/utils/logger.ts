@@ -34,12 +34,12 @@ const logFormat = winston.format.combine(
 
 // Create logger instance
 const logger = winston.createLogger({
-    level: 'info',
-    format: logFormat,
-    transports: [
-        // Console output
-        new winston.transports.Console()
-    ]
+	level: 'info',
+	format: logFormat,
+	transports: [
+		// Console output
+		new winston.transports.Console()
+	]
 });
 
 export default logger;
